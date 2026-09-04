@@ -175,7 +175,12 @@ export class Room extends DurableObject {
   async resetExample(slug, revision = "") {
     const stored = await this.env.DOCS.get(`examples/${slug}.json`);
     if (!stored) return;
-    const seeds = await stored.json();
+    // Anything but a list of seeds -- a null, which is what an example with no
+    // annotations on it used to be stored as -- seeds an empty room. Returning
+    // early instead would leave the room unmarked, so every visit would come
+    // back here and read the object again.
+    const parsed = await stored.json();
+    const seeds = Array.isArray(parsed) ? parsed : [];
     const old = await this.ctx.storage.list({ prefix: "c:" });
     if (old.size) await this.ctx.storage.delete([...old.keys()]);
     let seq = 0;

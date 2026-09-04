@@ -87,6 +87,36 @@ async function run() {
   out.leftovers = [...store.keys()].filter((k) => k === "documents/old/" + "0".repeat(64) + ".html" || k === "examples/old.json");
   out.stillIndexed = Object.hasOwn(JSON.parse(store.get("index.json").body), "old");
 
+  // An example with no annotations arrives as a null -- a nil slice in Go
+  // marshals to null, not [] -- and used to be stored as one, which threw
+  // where nobody could see it the moment a reader opened the document.
+  out.nullAnnotations = await upload({ title: "empty eg", html: "<p>e</p>", example: true, annotations: null });
+  out.storedSeeds = store.get("examples/" + out.nullAnnotations.body.slug + ".json").body;
+
+  // The room reading that object must seed an empty room rather than throw,
+  // so an example stored as a null before this fix still opens.
+  const storage = new Map();
+  const ctx = {
+    getWebSockets: () => [],
+    storage: {
+      async get(key) { return storage.get(key); },
+      async put(entries, value) {
+        if (typeof entries === "string") storage.set(entries, value);
+        else for (const [key, item] of Object.entries(entries)) storage.set(key, item);
+      },
+      async list({ prefix }) {
+        return new Map([...storage].filter(([key]) => key.startsWith(prefix)));
+      },
+      async delete(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) storage.delete(key); },
+      async getAlarm() { return null; },
+      async setAlarm() {},
+    },
+  };
+  store.set("examples/legacy.json", { body: "null", etag: "x" });
+  const instance = new Room(ctx, env);
+  await instance.resetExample("legacy", "r1");
+  out.legacySeeded = await ctx.storage.get("example");
+
   console.log(JSON.stringify(out));
 }
 run();
@@ -146,8 +176,11 @@ func TestWorkerUploadQuotas(t *testing.T) {
 			Status int
 			Body   struct{ Slug string }
 		}
-		Leftovers    []string
-		StillIndexed bool `json:"stillIndexed"`
+		Leftovers       []string
+		StillIndexed    bool                 `json:"stillIndexed"`
+		StoredSeeds     string               `json:"storedSeeds"`
+		LegacySeeded    string               `json:"legacySeeded"`
+		NullAnnotations struct{ Status int } `json:"nullAnnotations"`
 	}
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("decoding results: %v\n%s", err, out.String())
@@ -188,5 +221,13 @@ func TestWorkerUploadQuotas(t *testing.T) {
 	if len(got.Leftovers) != 0 || got.StillIndexed {
 		t.Errorf("after migration: leftovers %v, still indexed %v; want neither",
 			got.Leftovers, got.StillIndexed)
+	}
+	if got.NullAnnotations.Status != 201 || got.StoredSeeds != "[]" {
+		t.Errorf("an example with null annotations stored %q at status %d, want [] at 201",
+			got.StoredSeeds, got.NullAnnotations.Status)
+	}
+	if got.LegacySeeded != "legacy" {
+		t.Errorf("a room seeded from a stored null marked itself %q, want %q",
+			got.LegacySeeded, "legacy")
 	}
 }

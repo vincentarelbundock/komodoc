@@ -513,7 +513,11 @@ async function readUpload(request) {
   const size = new TextEncoder().encode(html).byteLength;
   if (size > MAX_HTML) return json({ error: "document too large" }, 413);
 
-  return { title, slug, html, example: Boolean(example), annotations, size };
+  // An example with nothing seeded on it sends a null here -- a nil slice in Go
+  // marshals to null, not [] -- and a destructuring default only fires on
+  // undefined, so the null has to be turned back into a list by hand or it is
+  // stored as one and iterated later.
+  return { title, slug, html, example: Boolean(example), annotations: Array.isArray(annotations) ? annotations : [], size };
 }
 
 // Thrown from inside updateIndex's mutate callback. The callback runs
