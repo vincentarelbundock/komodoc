@@ -1,4 +1,5 @@
 CLOUDFLARE_API_TOKEN: ENC[AES256_GCM,data:Q/X+0JMyGTkBtN7ikkohnl71ZAm6b+2sv6zcn/Sv2/6DdxE20pdmq+BiZ4+LWYcxxTZ25T0=,iv:HVPH3v5ENCeAK4j1GdUqvy88Lgj3Hdl+d4Hy4JQsfBQ=,tag:6dFgRgd7//KnIZ8uPgb/CA==,type:str]
+KOMODOC_SERVER: ENC[AES256_GCM,data:iEvtXGOdlYJqugcAvDm6kSj2OghZCdMGXQr4bHneTbTzdPUcCCsCm12dGfB+lQ==,iv:f35rqt7FDFS7l9ABv11VRRqxoLxAFAo69KU7FXopKd4=,tag:pVkJOOXZL6/VHNftplFWrg==,type:str]
 KOMODOC_LABEL: ENC[AES256_GCM,data:Cro6GxNvQg==,iv:/GMEqsZgu7lCHtvgUjsCSgJ16G4uVAw6y0DUfP37vNY=,tag:1yleZi12co4go1STOX0nbQ==,type:str]
 KOMODOC_ENDPOINT: ENC[AES256_GCM,data:QImZfE4HCwMtRBabTERVfiRSSsks,iv:puAXd7rgWApqVcoBd2ky29Z5F4A6BNfzno/fp4CtAKs=,tag:+wAs1t9v3UnP8jL5J40YuQ==,type:str]
 KOMODOC_GITHUB_CLIENT_ID: ENC[AES256_GCM,data:HsQ8koPv3HE+6R1B5gTaJpqd7FM=,iv:cphZhrLipIzBU2dd7Z5HQkXqG5ujinte0CL9XmCNCEA=,tag:d+UOU7HUHRQs2J8yPNy0cg==,type:str]
@@ -7,8 +8,8 @@ KOMODOC_ENDPOINT_SANDBOX: ENC[AES256_GCM,data:gBvS4d6f9c6mGxpNKkAiFcPKHMJVLuu2YH
 KOMODOC_GITHUB_CLIENT_ID_SANDBOX: ENC[AES256_GCM,data:IuDT/LAMbwOuvfKPK1S8ye/uXRQ=,iv:S9fQoTBKBvxXBjeVvI0vtckiOXxqditFjLdR0qDkQ44=,tag:wSPtdIZacI7I+IfPPGGDSQ==,type:str]
 KOMODOC_GITHUB_CLIENT_SECRET_SANDBOX: ENC[AES256_GCM,data:MJeDYHrpIBlkz32yJlyYd4lD63xjYOdj92Eeb9Ljy0k3cljGOkzYfw==,iv:YEviEfrQffP2YMAxFTb6aF3VPdryXUiIqo7YgT1HDTI=,tag:luBgvRt8SKGXpww4BZDAng==,type:str]
 sops:
-    lastmodified: "2026-09-03T12:22:48Z"
-    mac: ENC[AES256_GCM,data:h7acYVjsvH47oxjrHxFNxYip9Jv8iGtY5RoXsMlpUJZ4SSUeTeViwWFVpR717KeYJKTD/9/RNsy9bWf3k2ehp2duH6ELhP5Fg2w7e+WP8sq2fgDoS4sChWhvXcaN2IUgkuTb83lywOk3U0YPIDY3ruTpsf8Z35q/252J+sw3L14=,iv:YKHquInq/TdosYJYICJzSWZ3Nmz/6j2gEvkx/gOKbS0=,tag:Ff/uOesJqqrIXW13Zqcz4g==,type:str]
+    lastmodified: "2026-09-04T14:17:44Z"
+    mac: ENC[AES256_GCM,data:cehKRkSh7oq2wQuL3vzk4gSfnJ20ESIYV8YYgLBFwOPeC0ju6W6MOus8UYNxEyOny8sWOLALmNYsx+vAL34I+b2QmhdqtO6Av6J5t8ldLbaxwWwApBvW+gKFmtgG0g18miysjjVRLgJ1nRsgqpwxS3JjVJ5BmDg1zT1xLWtaDQw=,iv:0SUj1ZcpxhYBLrxXEaZ2U+Q/hNIKh38oLi8OsC4cI1c=,tag:G556u9soiPiqtSXayoatbg==,type:str]
     pgp:
         - created_at: "2026-09-03T12:08:40Z"
           enc: |-
