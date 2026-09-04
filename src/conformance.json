@@ -69,5 +69,16 @@
     {"value": "delete \u007f here", "limit": 40, "kept": "delete  here"},
     {"value": "truncated to ten", "limit": 10, "kept": "truncated "},
     {"value": "", "limit": 10, "kept": ""}
+  ],
+
+  "example_suffixes": [
+    {"base": "html-a-short-style-guide-for-quantitative-writing", "suffix": "72wgqautjz"},
+    {"base": "markdown-what-a-regression-table-is-hiding", "suffix": "c9kqgt7acs"},
+    {"base": "quarto-what-the-bootstrap-actually-resamples", "suffix": "j9iu5cqy7b"},
+    {"base": "calepin-newton-s-method-is-not-always-your-friend", "suffix": "2sdp6b6aga"},
+    {"base": "jupyter-simpson-s-paradox-is-not-a-paradox", "suffix": "b5serei7j7"},
+    {"base": "marimo-how-far-does-a-drunk-walk", "suffix": "2c9n8gwd6i"},
+    {"base": "a", "suffix": "q8ah856hzy"},
+    {"base": "", "suffix": "dq4bhmaq5g"}
   ]
 }

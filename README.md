@@ -40,13 +40,21 @@ The Komodoc sandbox is a free website where anyone can upload small (<4MB) short
 
 If you do not want to log in but want to try annotating some documents, you can try one of these live examples:
 
-- [HTML: A Short Style Guide for Quantitative Writing](https://komodoc.vincentarelbundock.workers.dev/docs/html-a-short-style-guide-for-quantitative-writing)
-- [Markdown: What a Regression Table Is Hiding](https://komodoc.vincentarelbundock.workers.dev/docs/markdown-what-a-regression-table-is-hiding)
-- [Quarto: What the Bootstrap Actually Resamples](https://komodoc.vincentarelbundock.workers.dev/docs/quarto-what-the-bootstrap-actually-resamples)
-- [Calepin: Newton's Method Is Not Always Your Friend](https://komodoc.vincentarelbundock.workers.dev/docs/calepin-newton-s-method-is-not-always-your-friend)
-- [Jupyter: Simpson's Paradox Is Not a Paradox](https://komodoc.vincentarelbundock.workers.dev/docs/jupyter-simpson-s-paradox-is-not-a-paradox)
-- [Marimo: How Far Does a Drunk Walk?](https://komodoc.vincentarelbundock.workers.dev/docs/marimo-how-far-does-a-drunk-walk)
+- [HTML: A Short Style Guide for Quantitative Writing](https://komodoc.vincentarelbundock.workers.dev/docs/html-a-short-style-guide-for-quantitative-writing-72wgqautjz)
+- [Markdown: What a Regression Table Is Hiding](https://komodoc.vincentarelbundock.workers.dev/docs/markdown-what-a-regression-table-is-hiding-c9kqgt7acs)
+- [Quarto: What the Bootstrap Actually Resamples](https://komodoc.vincentarelbundock.workers.dev/docs/quarto-what-the-bootstrap-actually-resamples-j9iu5cqy7b)
+- [Calepin: Newton's Method Is Not Always Your Friend](https://komodoc.vincentarelbundock.workers.dev/docs/calepin-newton-s-method-is-not-always-your-friend-2sdp6b6aga)
+- [Jupyter: Simpson's Paradox Is Not a Paradox](https://komodoc.vincentarelbundock.workers.dev/docs/jupyter-simpson-s-paradox-is-not-a-paradox-b5serei7j7)
+- [Marimo: How Far Does a Drunk Walk?](https://komodoc.vincentarelbundock.workers.dev/docs/marimo-how-far-does-a-drunk-walk-2c9n8gwd6i)
 - [Publication and management console](https://komodoc.vincentarelbundock.workers.dev) (requires Github Login)
+
+A published document lives at `/docs/<title>-<suffix>`, where the suffix is
+random so the link cannot be guessed from the title. The seeded examples above
+are the exception: their suffix is derived from the title rather than drawn at
+random, so re-seeding the sandbox leaves these links pointing at the same
+documents. That is safe only because an example is public on purpose; every
+other document keeps an unguessable address. A link that resolves to nothing
+gets a 404 page saying so.
 
 <aside class="callout warning">
 <strong>Warning:</strong> Do not publish confidential information on the Komodoc sandbox. Normally, documents are only visible to the person who uploaded them, or to people with the randomly generated and unlisted link. But if you are gathering comments on documents about national security, you should probably <a href="#self-managed-server">host your own instance</a> or find another solution.
@@ -71,7 +79,7 @@ Click on the thumbnails near to top of this page for screenshots of the Komodoc 
 Every command executed from the CLI must point to a specific Komodoc server. Typically, users will specify their server with a flag. For example, to make a request against the Komodoc sandbox, a live instance maintained by the developers, use:
 
 ```sh
-komodoc <COMMAND> --server https://komodo.vincentarelbundock.workers.dev
+komodoc <COMMAND> --server https://komodoc.vincentarelbundock.workers.dev
 ```
 
 When making repeated calls to the same server, it is convenient to specify the address using an [Environment Variable](#environment-variables). This allows us to omit the `--server` flag:
@@ -109,37 +117,41 @@ quarto render paper.qmd --to html -M embed-resources:true
 
 ### List
 
-List the documents visible to your account. Each row shows the shortest prefix
-that uniquely identifies the document, its date, and its title:
+List the documents visible to your account. Each row shows a short ID -- at
+least three characters, and the same width for every document -- along with its
+date and title. The ID is a prefix of the document's random suffix, so it
+changes when a document is published again; the IDs below are one listing's,
+not fixed names:
 
 ```sh
 komodoc list
 ```
 
 ```
-i  2026-09-03  Marimo: How Far Does a Drunk Walk?
-b  2026-09-03  Jupyter: Simpson's Paradox Is Not a Paradox
-w  2026-09-03  Calepin: Newton's Method Is Not Always Your Friend
-r  2026-09-03  Quarto: What the Bootstrap Actually Resamples
-5  2026-09-03  Markdown: What a Regression Table Is Hiding
-y  2026-09-03  HTML: A Short Style Guide for Quantitative Writing
+wpw  2026-09-04  Marimo: How Far Does a Drunk Walk?
+ecw  2026-09-04  Jupyter: Simpson's Paradox Is Not a Paradox
+eum  2026-09-04  Calepin: Newton's Method Is Not Always Your Friend
+i6d  2026-09-04  Quarto: What the Bootstrap Actually Resamples
+mr6  2026-09-04  Markdown: What a Regression Table Is Hiding
+s9p  2026-09-04  HTML: A Short Style Guide for Quantitative Writing
 ```
 
 ### Comment
 
-Open a listed document in your browser for commenting. The ID can be the short
-prefix printed by `list` (or the full slug):
+Open a listed document in your browser for commenting. The ID is the one `list`
+prints (a full slug also works):
 
 ```sh
-komodoc comment 5
+komodoc comment mr6
 ```
 
 ### Export
 
-Export annotations as readable Markdown:
+Export annotations as readable Markdown. `export` takes the same ID `comment`
+does -- a short ID from `list`, or a full slug:
 
 ```sh
-komodoc export DOCUMENT-SLUG --format markdown --out comments.md
+komodoc export mr6 --format markdown --out comments.md
 ```
 
 Without `--format markdown`, Komodoc exports W3C Web Annotation JSON-LD.

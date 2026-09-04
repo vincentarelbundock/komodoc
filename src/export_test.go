@@ -227,3 +227,52 @@ func TestExportRegionAsFragmentSelector(t *testing.T) {
 		t.Fatalf("image identifiers came out as %v", selector)
 	}
 }
+
+// listing builds the shape /api/list returns, so a test can name documents by
+// the only field shortIDs reads.
+func listing(slugs ...string) []any {
+	documents := make([]any, 0, len(slugs))
+	for _, slug := range slugs {
+		documents = append(documents, map[string]any{"slug": slug})
+	}
+	return documents
+}
+
+// A handle that is one character today collides with the next document
+// published, and reads as a typo besides, so every handle is at least three
+// characters wide.
+func TestShortIDsAreAtLeastThreeCharacters(t *testing.T) {
+	ids := shortIDs(listing("paper-abcdefghij", "notes-zyxwvutsrq"))
+	for slug, id := range ids {
+		if len(id) != 3 {
+			t.Fatalf("%s got the handle %q (%d characters), want 3", slug, id, len(id))
+		}
+	}
+	if ids["paper-abcdefghij"] != "abc" || ids["notes-zyxwvutsrq"] != "zyx" {
+		t.Fatalf("handles came from the wrong part of the slug: %v", ids)
+	}
+}
+
+// Ragged handles are hard to read down a column, so documents that need a
+// longer prefix widen every handle, not just their own.
+func TestShortIDsShareOneWidth(t *testing.T) {
+	ids := shortIDs(listing("a-abcdefghij", "b-abczefghij", "c-zyxwvutsrq"))
+	for slug, id := range ids {
+		if len(id) != 4 {
+			t.Fatalf("%s got the handle %q (%d characters), want 4", slug, id, len(id))
+		}
+	}
+	if ids["a-abcdefghij"] == ids["b-abczefghij"] {
+		t.Fatalf("two documents share the handle %q", ids["a-abcdefghij"])
+	}
+}
+
+// An explicit slug shorter than the common width is its own handle: there is
+// nothing left to cut, and padding it would invent characters that do not
+// address anything.
+func TestShortIDsKeepShortSlugsWhole(t *testing.T) {
+	ids := shortIDs(listing("cv", "paper-abcdefghij"))
+	if ids["cv"] != "cv" {
+		t.Fatalf("short slug got the handle %q, want %q", ids["cv"], "cv")
+	}
+}

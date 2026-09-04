@@ -1095,3 +1095,22 @@ nav > ul.navmid svg {
     opacity: 1;
   }
 }
+
+/* ---------------------------------------------------------------- not found */
+
+/* A dead link is a dead end, so the page is short and centred rather than
+   laid out like a document that has something to read. */
+.notfound {
+  max-width: 34rem;
+  text-align: center;
+}
+.notfound h1 {
+  margin-bottom: 0.75rem;
+}
+.notfound p:last-child {
+  display: flex;
+  gap: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2rem;
+}

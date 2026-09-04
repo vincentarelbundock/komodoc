@@ -337,12 +337,18 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleComments(w, r, match[1])
 		return
 	}
-
 	// --- the shell -----------------------------------------------------------
 	page := path
 	if _, static := s.shell[page]; !static {
 		switch {
 		case reDocsPage.MatchString(path):
+			slug := strings.TrimPrefix(path, "/docs/")
+			if _, exists := s.store.get(slug); !exists {
+				// Serving the reader here would answer a dead link with 200
+				// and an empty page, which reads as the reader being broken.
+				s.notFound(w, r)
+				return
+			}
 			page = "/reader.html"
 		case path == "/":
 			page = "/index.html"
@@ -353,7 +359,24 @@ func (s *server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeAsset(w, asset)
 		return
 	}
-	http.Error(w, "not found", http.StatusNotFound)
+	s.notFound(w, r)
+}
+
+// notFound answers a browser asking for a page with the 404 page, and anything
+// else -- a fetch, a script, an image -- with the plain line it can actually
+// use. Both carry the 404 status; only the shape of the body differs.
+func (s *server) notFound(w http.ResponseWriter, r *http.Request) {
+	asset, ok := s.shell["/404.html"]
+	if !ok || !strings.Contains(r.Header.Get("accept"), "text/html") {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("content-type", asset.Type)
+	// A link that is dead now may resolve after the next publish, so this answer
+	// is never the one a cache should keep.
+	w.Header().Set("cache-control", "no-store")
+	w.WriteHeader(http.StatusNotFound)
+	_, _ = io.WriteString(w, asset.Body)
 }
 
 func (s *server) handleSocket(w http.ResponseWriter, r *http.Request, slug string) {

@@ -141,8 +141,17 @@ func listDocuments(serverFlag string) {
 	}
 }
 
-// shortIDs gives each listed document the shortest prefix of its generated
-// random suffix (or explicit slug) that is unique within this listing.
+// The shortest handle `list` will print. One character is unique today and
+// ambiguous after the next publish, and it reads as a typo rather than a name;
+// three is short enough to type and stable enough to keep in a note.
+const shortIDMinimum = 3
+
+// shortIDs gives each listed document a short handle: a prefix of its
+// generated random suffix (or explicit slug). Every handle is cut to the same
+// width -- ragged ids are hard to read down a column and hard to remember --
+// which is the longest prefix any one document needs to be unambiguous, and
+// never fewer than three characters, so a handle stays recognisable and keeps
+// working as the listing grows.
 func shortIDs(documents []any) map[string]string {
 	type item struct{ slug, key string }
 	items := make([]item, 0, len(documents))
@@ -159,9 +168,10 @@ func shortIDs(documents []any) map[string]string {
 		}
 		items = append(items, item{slug: slug, key: key})
 	}
-	ids := make(map[string]string, len(items))
+
+	width := shortIDMinimum
 	for _, current := range items {
-		chosen := current.key
+		needed := len(current.key)
 		for length := 1; length <= len(current.key); length++ {
 			prefix := current.key[:length]
 			matches := 0
@@ -171,24 +181,45 @@ func shortIDs(documents []any) map[string]string {
 				}
 			}
 			if matches == 1 {
-				chosen = prefix
+				needed = length
 				break
 			}
 		}
-		ids[current.slug] = chosen
+		if needed > width {
+			width = needed
+		}
+	}
+
+	ids := make(map[string]string, len(items))
+	for _, current := range items {
+		// A key shorter than the common width is used whole; it is already as
+		// distinct as it will ever be.
+		if width < len(current.key) {
+			ids[current.slug] = current.key[:width]
+		} else {
+			ids[current.slug] = current.key
+		}
 	}
 	return ids
 }
 
-func commentDocument(identifier, serverFlag string) {
-	server := serverFrom(serverFlag)
+// resolveIdentifier turns what the user typed -- a full slug, or one of the
+// short handles `list` prints -- into the slug the API knows. Both `comment`
+// and `export` go through here so a handle means the same thing everywhere.
+func resolveIdentifier(identifier, server string) string {
+	// A full slug needs no listing, and so no token: this is the path an
+	// export from a link someone sent takes.
+	if status, _ := do("GET", server+"/api/documents/"+identifier, nil, nil, 30*time.Second); status == 200 {
+		return identifier
+	}
+
 	status, payload := postAuthed(server+"/api/list", map[string]any{}, requireToken(), 60*time.Second)
 	if status != 200 {
 		die("listing failed (%d): %v", status, detailOf(payload))
 	}
 	documents, _ := payload["documents"].([]any)
 	ids := shortIDs(documents)
-	var match map[string]any
+	var match string
 	for _, value := range documents {
 		document, ok := value.(map[string]any)
 		if !ok {
@@ -196,17 +227,21 @@ func commentDocument(identifier, serverFlag string) {
 		}
 		slug := text(document["slug"])
 		if identifier == slug || identifier == ids[slug] {
-			if match != nil {
+			if match != "" {
 				die("%q matches more than one document", identifier)
 			}
-			match = document
+			match = slug
 		}
 	}
-	if match == nil {
+	if match == "" {
 		die("no visible document matches %q", identifier)
 	}
-	slug := text(match["slug"])
-	openURL(server + "/docs/" + slug)
+	return match
+}
+
+func commentDocument(identifier, serverFlag string) {
+	server := serverFrom(serverFlag)
+	openURL(server + "/docs/" + resolveIdentifier(identifier, server))
 }
 
 func openURL(target string) {

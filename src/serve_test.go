@@ -370,11 +370,17 @@ func TestListingAndDelete(t *testing.T) {
 }
 
 func TestShellRoutes(t *testing.T) {
-	server, _ := newTestServer(t)
+	server, instance := newTestServer(t)
+	// The reader is only served for a document that exists, so the listing
+	// needs one before its page can be asked for.
+	slug := "a-paper-abcdefghij"
+	if _, err := instance.store.put(slug, "A Paper", digestOf("<p>p</p>"), "<p>p</p>", "", ""); err != nil {
+		t.Fatal(err)
+	}
 	for path, want := range map[string]string{
-		"/":              "<!doctype html",
-		"/docs/anything": "<!doctype html",
-		"/anchor.js":     "export",
+		"/":             "<!doctype html",
+		"/docs/" + slug: "<!doctype html",
+		"/anchor.js":    "export",
 	} {
 		response, err := http.Get(server.URL + path)
 		if err != nil {
@@ -384,6 +390,32 @@ func TestShellRoutes(t *testing.T) {
 		response.Body.Close()
 		if response.StatusCode != 200 || !strings.Contains(strings.ToLower(string(body)), want) {
 			t.Fatalf("%s returned %d, body did not contain %q", path, response.StatusCode, want)
+		}
+	}
+}
+
+// A link nobody can follow used to answer 200 with the reader shell, which
+// left the reader looking broken rather than the link. It gets the 404 page,
+// with the status to match.
+func TestUnknownPathsGetTheNotFoundPage(t *testing.T) {
+	server, _ := newTestServer(t)
+	for _, path := range []string{"/docs/no-such-document", "/nothing-here"} {
+		request, err := http.NewRequest("GET", server.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("accept", "text/html")
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := io.ReadAll(response.Body)
+		response.Body.Close()
+		if response.StatusCode != 404 {
+			t.Fatalf("%s returned %d, want 404", path, response.StatusCode)
+		}
+		if !strings.Contains(string(body), "Nothing here") {
+			t.Fatalf("%s did not serve the 404 page: %.80s", path, body)
 		}
 	}
 }

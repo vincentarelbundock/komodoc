@@ -40,6 +40,7 @@ var shellRoutes = map[string]string{
 	"/pico.css":               "vendor/pico.css",
 	"/index.html":             "index.html",
 	"/reader.html":            "reader.html",
+	"/404.html":               "404.html",
 	"/komodoc.css":            "komodoc.css",
 	"/reader.js":              "reader.js",
 	"/agent.js":               "agent.js",

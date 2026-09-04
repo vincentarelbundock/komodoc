@@ -317,12 +317,31 @@ function existingExampleKey(entries, base) {
   return null;
 }
 
+// exampleSuffix is the suffix a seeded example gets instead of a random one.
+// The examples are the documents whose links are written down -- in the README,
+// in a talk, in a bookmark -- and re-seeding them used to mint a new random
+// suffix and break every one of those links. Deriving the suffix from the base
+// instead makes it stable across a reseed, a redeploy, even a destroyed and
+// rebuilt service, while still looking like the random suffix every other
+// document carries. It is not a secret: an example is public on purpose, which
+// is exactly why it may have a guessable address.
+async function exampleSuffix(base) {
+  const digest = await sha256("komodoc example " + base);
+  const alphabet = CONFIG.suffix_alphabet;
+  let out = "";
+  for (let i = 0; i < CONFIG.suffix_length; i++) {
+    out += alphabet[parseInt(digest.slice(i * 2, i * 2 + 2), 16) % alphabet.length];
+  }
+  return out;
+}
+
 function randomSuffix() {
   const alphabet = CONFIG.suffix_alphabet;
   return [...crypto.getRandomValues(new Uint8Array(CONFIG.suffix_length))]
     .map((byte) => alphabet[byte % alphabet.length])
     .join("");
 }
+
 
 async function readIndex(env) {
   const object = await env.DOCS.get("index.json");
@@ -607,7 +626,7 @@ async function handleUpload(request, env) {
   // new suffixed document is written and the old entry drops out of the index.
   const legacyExample = example && existingBase?.example ? base : null;
   const key = example
-    ? (legacyExample ? null : existingExampleKey(existingIndex, base)) || `${base}-${randomSuffix()}`
+    ? (legacyExample ? null : existingExampleKey(existingIndex, base)) || `${base}-${await exampleSuffix(base)}`
     : replacing
       ? base
       : `${base}-${randomSuffix()}`;
@@ -887,13 +906,19 @@ export default {
     // --- the shell ---------------------------------------------------------
     // Served from constants compiled into this script rather than from a
     // static-asset binding, so deploying is one script upload and nothing else.
-    const page = SHELL[path]
-      ? path
-      : /^\/docs\/[^/]+$/.test(path)
-        ? "/reader.html"
-        : path === "/"
-          ? "/index.html"
-          : path;
+    let page = SHELL[path] ? path : path === "/" ? "/index.html" : path;
+    const documentPage = !SHELL[path] && /^\/docs\/[^/]+$/.test(path);
+    if (documentPage) {
+      const slug = path.slice("/docs/".length);
+      const { entries } = await readIndex(env);
+      if (lookup(entries, slug)) {
+        page = "/reader.html";
+      } else {
+        // Serving the reader here would answer a dead link with 200 and an
+        // empty page, which reads as the reader being broken.
+        return notFound(request);
+      }
+    }
     const asset = SHELL[page];
     if (asset) {
       // Shell pages -- not /agent.js, not a document -- refuse to be framed
@@ -916,9 +941,24 @@ export default {
       }
       return response;
     }
-    return new Response("not found", { status: 404 });
+    return notFound(request);
   },
 };
+
+// notFound answers a browser asking for a page with the 404 page, and anything
+// else -- a fetch, a script, an image -- with the plain line it can actually
+// use. Both carry the 404 status; only the shape of the body differs.
+function notFound(request) {
+  const asset = SHELL["/404.html"];
+  if (!asset || !(request.headers.get("accept") || "").includes("text/html")) {
+    return new Response("not found", { status: 404 });
+  }
+  const response = assetResponse(asset, { shellPage: true, status: 404 });
+  // A link that is dead now may resolve after the next publish, so this answer
+  // is never the one a cache should keep.
+  response.headers.set("cache-control", "no-store");
+  return response;
+}
 
 // A request is "cookie-authenticated" when it carries no bearer token; only
 // those requests need an origin check, since a bearer has to be typed or
@@ -1077,7 +1117,7 @@ async function handleAuth(request, env, url) {
 // documentation -- which must refuse to be framed by anyone at all; /agent.js
 // is served through this same function but is not a page, and documents carry
 // their own CSP via documentHeaders, so neither passes the flag.
-function assetResponse(asset, { shellPage = false } = {}) {
+function assetResponse(asset, { shellPage = false, status = 200 } = {}) {
   let body = asset.body;
   if (asset.base64) {
     const binary = atob(asset.body);
@@ -1085,6 +1125,7 @@ function assetResponse(asset, { shellPage = false } = {}) {
     for (let i = 0; i < binary.length; i++) body[i] = binary.charCodeAt(i);
   }
   return new Response(body, {
+    status,
     headers: {
       "content-type": asset.type,
       ...PRIVACY_HEADERS,

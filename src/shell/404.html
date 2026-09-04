@@ -1,0 +1,38 @@
+<!doctype html>
+<html data-theme="light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Not found · Komodoc</title>
+    <link rel="icon" type="image/svg+xml" href="/assets/komodo-logo.svg" />
+    <link rel="stylesheet" href="/pico.css" />
+    <link rel="stylesheet" href="/komodoc.css" />
+  </head>
+  <body>
+    <!-- The other pages inline the two-tone logomark because they use it twice,
+         in the nav and in the hero. This page shows it once, so it takes the
+         standalone file instead of carrying a third copy of the artwork. -->
+    <main class="container notfound">
+      <div class="hero">
+        <a href="/" aria-label="Komodoc home">
+          <img class="mark" src="/assets/komodo-logo.svg" alt="" />
+        </a>
+        <span class="wordmark"><span class="wordmark-komo">komo</span><span class="wordmark-doc">doc</span></span>
+      </div>
+
+      <h1>Nothing here</h1>
+      <!-- Documents are deleted, and re-seeded examples are published under a
+           new random suffix, so a link that worked last month can stop
+           resolving. Saying which of those happened is not possible from here;
+           saying that the link, not the reader, is what failed is. -->
+      <p>
+        This link does not point at a document on this deployment. It may have
+        been deleted, or published again under a new address.
+      </p>
+      <p>
+        <a href="/" role="button">Go to the console</a>
+        <a href="/documentation">Read the documentation</a>
+      </p>
+    </main>
+  </body>
+</html>

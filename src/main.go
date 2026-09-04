@@ -38,7 +38,7 @@ const usage = `komodoc: host HTML documents that readers can annotate.
   komodoc serve                        run the service on this machine
   komodoc list                         list your documents
   komodoc comment ID                   open a document for commenting
-  komodoc export SLUG                  annotations as W3C JSON-LD or markdown
+  komodoc export ID                    annotations as W3C JSON-LD or markdown
   komodoc seed [--server URL]          replace local or remote data with examples
   komodoc destroy --document SLUG      delete one document and its comments
   komodoc destroy --service            delete the whole deployment
@@ -273,11 +273,11 @@ func main() {
 		_ = flags.Parse(os.Args[2:])
 		rest := flags.Args()
 		if len(rest) == 0 {
-			die("usage: komodoc export SLUG [--format jsonld|markdown] [--out FILE]")
+			die("usage: komodoc export ID [--format jsonld|markdown] [--out FILE]")
 		}
-		slug := rest[0]
+		identifier := rest[0]
 		_ = flags.Parse(rest[1:])
-		exportDocument(slug, *server, *format, *out)
+		exportDocument(identifier, *server, *format, *out)
 
 	case "list":
 		flags := flag.NewFlagSet("list", flag.ExitOnError)

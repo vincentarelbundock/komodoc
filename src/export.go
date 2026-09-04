@@ -137,8 +137,11 @@ type annotationPage struct {
 	Items   []annotation `json:"items"`
 }
 
-func exportDocument(slug, serverFlag, format, out string) {
+// exportDocument takes the same identifier `comment` does: a full slug, or one
+// of the short handles `list` prints.
+func exportDocument(identifier, serverFlag, format, out string) {
 	server := serverFrom(serverFlag)
+	slug := resolveIdentifier(identifier, server)
 
 	status, raw := do("GET", server+"/api/documents/"+slug, nil, nil, 30*time.Second)
 	if status != 200 {

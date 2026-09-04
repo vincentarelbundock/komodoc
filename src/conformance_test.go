@@ -44,6 +44,13 @@ type conformance struct {
 		Limit int    `json:"limit"`
 		Kept  string `json:"kept"`
 	} `json:"messages"`
+	// A seeded example's suffix is derived, not random, so the two backends
+	// must derive the same one or a published link resolves on one and not the
+	// other.
+	ExampleSuffixes []struct {
+		Base   string `json:"base"`
+		Suffix string `json:"suffix"`
+	} `json:"example_suffixes"`
 }
 
 func loadConformance(t *testing.T) conformance {
@@ -98,6 +105,11 @@ func TestGoMatchesTheConformanceFixtures(t *testing.T) {
 			t.Errorf("clean(%q, %d) = %q, want %q", item.Value, item.Limit, got, item.Kept)
 		}
 	}
+	for _, item := range fixtures.ExampleSuffixes {
+		if got := exampleSuffix(item.Base); got != item.Suffix {
+			t.Errorf("exampleSuffix(%q) = %q, want %q", item.Base, got, item.Suffix)
+		}
+	}
 }
 
 // The Worker's answers, gathered by running the built script under node with an
@@ -120,6 +132,8 @@ const answers = {
   tags: fixtures.tags.map((item) => cleanTags(item.value)),
   regions: fixtures.regions.map((item) => validRegion(item.value) !== null),
   messages: fixtures.messages.map((item) => clean(item.value, item.limit)),
+  example_suffixes: await Promise.all(
+    fixtures.example_suffixes.map((item) => exampleSuffix(item.base))),
 };
 console.log(JSON.stringify(answers));
 `
@@ -129,11 +143,12 @@ type workerAnswers struct {
 		Describe string          `json:"describe"`
 		Allows   map[string]bool `json:"allows"`
 	} `json:"policies"`
-	Slugs       []bool     `json:"slugs"`
-	Motivations []string   `json:"motivations"`
-	Tags        [][]string `json:"tags"`
-	Regions     []bool     `json:"regions"`
-	Messages    []string   `json:"messages"`
+	Slugs           []bool     `json:"slugs"`
+	Motivations     []string   `json:"motivations"`
+	Tags            [][]string `json:"tags"`
+	Regions         []bool     `json:"regions"`
+	Messages        []string   `json:"messages"`
+	ExampleSuffixes []string   `json:"example_suffixes"`
 }
 
 func TestWorkerMatchesTheConformanceFixtures(t *testing.T) {
@@ -201,6 +216,12 @@ func TestWorkerMatchesTheConformanceFixtures(t *testing.T) {
 		if answers.Messages[i] != item.Kept {
 			t.Errorf("worker clean(%q, %d) = %q, want %q",
 				item.Value, item.Limit, answers.Messages[i], item.Kept)
+		}
+	}
+	for i, item := range fixtures.ExampleSuffixes {
+		if answers.ExampleSuffixes[i] != item.Suffix {
+			t.Errorf("worker exampleSuffix(%q) = %q, want %q",
+				item.Base, answers.ExampleSuffixes[i], item.Suffix)
 		}
 	}
 }

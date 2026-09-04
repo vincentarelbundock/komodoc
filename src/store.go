@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -346,4 +347,22 @@ func slugify(value string) string {
 		slug = string(runes[:config.SlugMax])
 	}
 	return strings.Trim(slug, "-")
+}
+
+// exampleSuffix is the suffix a seeded example gets instead of a random one.
+// The examples are the documents whose links are written down -- in the
+// README, in a talk, in a bookmark -- and re-seeding them used to mint a new
+// random suffix and break every one of those links. Deriving the suffix from
+// the base instead makes it stable across a reseed, a redeploy, even a
+// destroyed and rebuilt service, while still looking like the random suffix
+// every other document carries. It is not a secret: an example is public on
+// purpose, which is exactly why it may have a guessable address.
+func exampleSuffix(base string) string {
+	sum := sha256.Sum256([]byte("komodoc example " + base))
+	alphabet := config.SuffixAlphabet
+	out := make([]byte, config.SuffixLength)
+	for i := range out {
+		out[i] = alphabet[int(sum[i])%len(alphabet)]
+	}
+	return string(out)
 }

@@ -83,7 +83,8 @@ func seed(dir string, documents []seedDocument) {
 	for _, document := range documents {
 		raw := readSeedDocument(document)
 
-		slug := slugify(document.Title) + "-" + randomSuffix()
+		base := slugify(document.Title)
+		slug := base + "-" + exampleSuffix(base)
 		entry, err := documentStore.put(slug, document.Title, digestOf(raw), raw, "", "")
 		if err != nil {
 			die("could not store %s: %v", document.File, err)
