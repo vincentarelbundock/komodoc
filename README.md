@@ -115,6 +115,11 @@ Quarto, render with:
 quarto render paper.qmd --to html -M embed-resources:true
 ```
 
+Publishing a file again, to a document that already exists, writes the file's
+text into the live document and marks a checkpoint in its history. It never
+conflicts with someone editing in the browser: their words and yours end up in
+the same document, the way two browsers' do.
+
 ### List
 
 List the documents visible to your account. Each row shows a short ID (at
@@ -159,36 +164,36 @@ komodoc edit c9k
 ```
 
 The editor is offered to whoever may replace the document, and the document
-opens ready to work on. Saving publishes a revision to the same link, so the
-comments survive it — as you type, they re-anchor against the edited text, and
-one whose passage is gone is marked as needing re-anchoring rather than
-quietly dropped.
+opens ready to work on. There is nothing to save: what is typed is the
+document, readers see it a moment later, and the comments survive it — as you
+type, they re-anchor against the edited text, and one whose passage is gone is
+marked as needing re-anchoring rather than quietly dropped.
 
 Several people can edit at once. The source is a CRDT (Yjs), so two people
 typing in the same sentence converge without either waiting for the other, and
-the toolbar says how many are in the session. The server relays the updates and
-remembers them for as long as somebody is editing; it never merges them, and
-needs no Yjs of its own. Nothing about a session is persisted, because the
-durable copy of a document is the source a save stores — that is what a session
-is seeded from when nobody is editing yet.
+the toolbar says how many are in the session. The server holds the document,
+relays every update and keeps the result, so closing the last tab loses nothing
+and whoever opens the document next, in a browser or with `komodoc sync`, joins
+what is there.
 
 What is shared is the source. The preview is not: each browser renders what it
 now has, so a session costs the deployment no CPU and no bandwidth beyond
 relaying a few dozen bytes per keystroke.
 
-A save publishes what the session holds, so everyone in it moves to the new
-version without being told they have collided. A version published from outside
-the session — from the command line, or a browser that was not in it — is
-refused rather than allowed to discard the work: the editor says so, and the
-save is rejected by the server, which checks against the index under the same
-lock that commits it.
+History is kept for you. The server takes a checkpoint of the source when the
+document has been quiet for a while, when the last editor leaves, when someone
+comments, and whenever `komodoc publish` or `komodoc sync` writes to it; the
+same text is never checkpointed twice. The timeline is behind the history
+button in the toolbar and behind `komodoc history`: open any checkpoint, name
+one, copy a link to it, or restore it. A restore is an edit, so nothing is ever
+rewritten or lost.
 
-Rendering happens in the browser, by the same compiler that published the
-document, built for WebAssembly. So the preview is the document that a save
-would store, byte for byte, and an edit made in the browser renders exactly as
-one made from the command line. The deployment renders nothing: it stores what
-the browser produced, the way it has always stored what the CLI produced —
-which is also why a live preview costs it no CPU and no bandwidth.
+Rendering happens in the browser, by the same compiler the command line
+renders with, built for WebAssembly — for readers as much as for editors. The
+deployment stores the source and nothing rendered from it, so what a reader
+sees is by construction what the source says, and a live document costs the
+deployment no CPU and no bandwidth beyond relaying a few dozen bytes per
+keystroke.
 
 Two formats, and they are not available in the same places:
 
@@ -205,10 +210,10 @@ is published and another way when it is edited.
 
 The typst module is thirty megabytes, typst itself and the fonts it sets
 documents in, so it is optional at build time and fetched only by someone who
-actually opens a typst document to edit. Both modules are fetched once and
-cached for a year. A build without the typst module hosts and annotates typst
-documents as usual and says so, rather than offering an editor that could not
-save.
+opens a typst document. Both modules are fetched once and cached for a year.
+Since nothing rendered is stored, a build without the typst module cannot show
+a typst document at all, and refuses to create one rather than storing a source
+nobody could read.
 
 Typst's HTML export is still marked experimental upstream, so complex
 documents may not survive it intact. Simple ones, including maths, come out as
@@ -218,9 +223,10 @@ The typst renderer is built by `make typst`, which needs a Rust toolchain and
 is deliberately not part of `make build`. Without it Komodoc builds and runs
 exactly as before, and simply does not offer typst editing.
 
-A document published as HTML has no markdown to reopen, and one published
-before its source was kept has none stored; publish it again from its markdown
-to make it editable. The list on the landing page marks which is which.
+A document published as HTML is its own source: it is shown as it was
+published and cannot be opened in the editor. One published before its source
+was kept has none stored; publish it again from its markdown to make it
+editable. The list on the landing page marks which is which.
 
 ### Storage
 
@@ -483,8 +489,9 @@ which travel over the wire to other browsers.
 The source is edited in CodeMirror 6, bound to a Yjs document. Two people
 typing in the same sentence converge without either waiting for the other, each
 keeps their own undo history, and each sees the other's caret where it actually
-is, labelled with their name. The server relays those updates and never reads
-them.
+is, labelled with their name. The server relays those updates and applies them
+to the copy it keeps, which is the document.
 
-A reader who only reads fetches the page and its bundle; CodeMirror and Yjs are
-a separate bundle, fetched only when an editor is actually opened.
+A reader who only reads fetches the page, its bundle and the Yjs document, and
+renders it as it changes; CodeMirror is a separate bundle, fetched only when an
+editor is actually opened.

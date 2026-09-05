@@ -1,12 +1,15 @@
 # SPEC: `komodoc sync`, the file on disk as a peer in the session
 
-Status: proposed. Nothing here is built.
+Status: proposed. Nothing here is built. Revised for `SPEC-history.md`, which
+makes the session the document and the server the peer that holds it; the
+publishing this spec once did is gone with the publish.
 
 ## The problem
 
 A document published from markdown or typst can be edited in the page it is
-read in, and several people can edit it at once: the source is a Yjs document,
-the server relays updates, and a save publishes a revision to the same link.
+read in, and several people can edit it at once: the source is a Yjs document
+the server holds and relays, and what readers see is that document as it
+stands (`SPEC-history.md`).
 That editor is the only door into a live session. The author who wrote the
 paper in vim, Positron or Emacs, and who renders it from a Makefile, has to
 choose between their own tools and the session: publish from the command line
@@ -15,7 +18,8 @@ and the session is bypassed, or open the browser and leave the tools behind.
 `komodoc sync` makes the file on disk a peer in the session. Run it on the
 file a document was published from, and edits made in any local editor flow
 into the session as a coauthor types in the browser, edits made in the browser
-land in the file, and saving the file publishes. The browser stays the tool
+land in the file, and saving the file marks a checkpoint in the document's
+history. The browser stays the tool
 for simultaneous work and for whoever has no toolchain; the file stays the
 tool for the author who has one. Neither is an import of the other.
 
@@ -41,9 +45,9 @@ The command runs until interrupted, and says what it is doing:
 ```
 syncing paper.typ with https://komodoc.arelbundock.com/docs/typst-what-a-confidence-interval-does-not-say-5vvxv8ebpd
 joined the session (2 people editing)
-paper.typ changed: published 4f2a91c
+paper.typ changed: checkpoint 4f2a91c
 session changed: wrote paper.typ
-paper.typ changed: published 8b03d77
+paper.typ changed: checkpoint 8b03d77
 ```
 
 Flags:
@@ -51,48 +55,49 @@ Flags:
 | flag | meaning |
 | --- | --- |
 | `--server` | the deployment, as every other command takes it |
-| `--no-publish` | keep the file and the session in step, but never publish; a save is a save in the browser |
 | `--interval 250ms` | how long the file has to stay quiet before it is read, and the session before it is written |
 
-Writing the file publishes, unless told not to. In the browser a save is a
-deliberate keystroke; on disk, writing the file is that keystroke. What is
-published is exactly the text of the session at that moment -- not the file --
-so a browser in the session sees "saved" rather than a warning, by the rule
-`published()` in `Reader.svelte` already applies.
+Writing the file asks the server for a checkpoint. In the browser nothing is
+deliberate any more -- the document is always current, and history is taken on
+the server's own schedule -- but on disk, writing the file is a deliberate act,
+and a deliberate act is worth a mark in the timeline. The checkpoint is of the
+session's text at that moment, which after reconciliation is the file's; the
+server writes nothing if that text is already the latest checkpoint.
 
 Only the owner of a document may edit its source, in the browser and here.
 The command checks ownership before it starts and refuses with a plain
 message, because the server drops a non-owner's `y-*` messages silently and a
 sync client that ran anyway would sit there doing nothing.
 
-## What does not change
+## What the server is
 
-The server is a relay and stays one. It holds the updates of a live session,
-hands them to whoever joins, and never merges. `yrs` does not go into the
-server in this spec; the sync client is where it goes, and the server needs
-no new message and no new route. The browser editor is untouched. The
-durable copy of a document is still the source a save stores.
+The server holds the document. `SPEC-history.md` puts `yrs` into the room:
+every update relayed is also applied to a document the server keeps,
+persists, and answers `y-open` from, so a session is never seeded by a peer
+and never ends when the last one leaves. The sync client is therefore a peer
+among peers and needs no new route. The two things it once had to do besides
+syncing -- seed a session from the stored source, and publish -- are the
+server's now, or nobody's. The browser editor changes in that spec, not here.
 
-The protocol the sync client speaks is the browser's, as it stands today:
+The protocol the sync client speaks is the browser's:
 
 | direction | message | meaning |
 | --- | --- | --- |
 | in | `hello {comments}` | on connect; the comments, which the client ignores |
-| out | `y-open` | I am editing |
-| in | `y-state {updates, seed, count}` | replay these, or seed the session from the stored source if `seed` |
+| out | `y-open` | I am here |
+| in | `y-state {updates, count}` | the document as the server holds it; replay these |
 | out, in | `y-update {update, replace?}` | one Yjs update, base64; `replace` means the whole state |
 | out, in | `y-awareness {update}` | who is here, base64, relayed and never stored |
 | in | `y-snapshot` | the log is long; send the whole state with `replace: true` |
 | in | `y-peers {count}` | how many sockets the room has |
-| in | `published {sha, title}` | a new version exists |
+| out | `y-checkpoint` | the file was written; take a checkpoint if the text has moved |
 
 Identity is the `Authorization: Bearer` header the command line already
-sends, on `GET /ws/<slug>`. The stored source and its SHA come from
-`GET /api/documents/<slug>/source`, and publishing is `POST /api/documents`
-with `base_sha`, which the store refuses with 409 if the document moved. All
-of this exists. The updates are Yjs's binary v1 encoding, which `yrs` reads
-and writes byte for byte, so a `yrs` document and a `Y.Doc` in a browser are
-peers without either knowing which the other is.
+sends, on `GET /ws/<slug>`. There is no source to fetch and no SHA to hold:
+the document's text is what `y-state` replays to. The updates are Yjs's
+binary v1 encoding, which `yrs` reads and writes byte for byte, so a `yrs`
+document and a `Y.Doc` in a browser are peers without either knowing which
+the other is.
 
 ## Design
 
@@ -106,15 +111,11 @@ task, so an update from the socket and a change from the disk are never
 applied to the document at the same time. The mutex the room uses for the
 same reason on the server is a single task here.
 
-On `y-state`:
-
-- `seed: true` -- nobody is editing. The client is the one to start the
-  session, and starts it from the stored source, not from the file: exactly
-  one peer seeds, and it seeds from what is published, the same as a browser.
-  Then the file is reconciled against the session as a local change (below),
-  so a file that has moved on since the last publish becomes the first edit
-  of the session rather than a second history of the same words.
-- `seed: false` -- replay the updates, then reconcile the file the same way.
+On `y-state`, replay the updates, then reconcile the file against the
+document as a local change (below), so a file that has moved on since the
+client last ran becomes an edit of the document rather than a second copy of
+the same words. There is no seeding: the server has the document whether or
+not anyone is editing it.
 
 On `y-snapshot`, send `encode_state_as_update_v1` with `replace: true`,
 which is what the browser does. On `y-awareness`, apply it and print who
@@ -148,7 +149,8 @@ its text into the file's, applied in one transaction, against the text as it
 stood at the start of that transaction. Because one task does everything,
 no remote update lands between reading the document and writing to it.
 
-Then, unless `--no-publish`, the session's text is rendered and published.
+Then `y-checkpoint` is sent, debounced by the same interval, so a burst of
+saves is one mark in the timeline.
 
 ### The merge, which is the only hard part
 
@@ -195,51 +197,38 @@ file changed on disk, and that is the editor's prompt to give, not ours. What
 the client guarantees is that the file on disk is never behind the session
 by more than the interval.
 
-### Publishing
+### What the client does not render
 
-The client has the engine, natively. Markdown renders with `render_markdown_document`; typst
-renders with `render_typst_document`, which reads includes, images and
-bibliographies from the directory the file is in. That is more than the
-browser can do today, where `#import` and `#bibliography` do not work
-because the engine's file map is a directory reader, and it is the reason
-publishing from the sync client rather than from the browser is worth having
-even for someone who does all their typing in the browser.
+The client has the engine natively, and an earlier draft had it render here:
+markdown with `render_markdown_document`, typst with
+`render_typst_document`, which reads includes, images and bibliographies from
+the directory the file is in. Nothing rendered is stored any more, and
+readers render for themselves, so there is nothing for the client to render
+for. What that leaves exposed is a gap the rendering used to paper over: a
+typst document that `#import`s a file or reads a `#bibliography` beside it
+renders on this machine and nowhere else, because the engine's file map in
+the browser is a directory reader with no directory. The browser editor has
+always had this gap; readers now have it too. Closing it means the files
+beside the source travelling with it -- a project rather than a file --
+which `SPEC-rust.md` lists as not built, and which this command is the
+natural place to feed once it exists.
 
-The POST carries the session's text as `source`, the rendered page as
-`html`, the format, the title the document already has, and `base_sha`. On
-201, `base_sha` becomes the new SHA. On 409, the document moved under the
-client; see the next section. A `published` broadcast for the client's own
-SHA is the receipt and is ignored. Every browser in the session compares the
-new source with its own text, finds them equal, and says "saved".
+### A write from outside
 
-Publishing is debounced by the same interval as writing, and a publish that
-is already in flight is not overlapped: the next one waits and carries
-whatever the text is when it starts. A document over `max_html` is refused
-here with the same message `publish` gives, before anything is sent.
-
-### A publish from outside
-
-Someone runs `komodoc publish` on the same slug, or saves from a browser that
-was reading rather than editing. The room broadcasts `published` with a SHA
-the client did not produce. The browser's rule is: fetch the source; if it
-equals the session's text, fine; otherwise warn and refuse to save until the
-page is reloaded. The client follows the same rule: fetch the source, adopt
-the SHA as `base_sha` if the text matches, otherwise print that a newer
-version was published from outside the session and stop publishing. The
-file and the session keep syncing; only publishing stops, until the author
-restarts the command, which re-seeds from what is now published and
-reconciles the file against it. Merging the outside version into the
-session is possible -- it is the same three-way merge -- and would let
-everyone carry on; it is left out of the first version because it changes
-what the browser sees without the browser having been told, and the
-browser's own rule is to stop.
+Someone runs `komodoc publish` on the same slug, restores a checkpoint from
+the reader, or types in a browser. Each is an edit into the one document,
+and the server relays it to the client as a `y-update` like any other; the
+mirror writes it to the file, the merge above keeps the author's unsaved
+words, and nothing stops. The rule an earlier draft had here -- stop
+publishing and wait for a restart -- existed because there were two copies
+of the document to disagree. There is one.
 
 ## Edge cases, and what is decided about each
 
-- **The file does not exist.** Written from the stored source on start, and
+- **The file does not exist.** Written from the document's text on start, and
   said so. This is how an author pulls a document down to edit locally.
-- **The file exists and was never published.** Refused: `sync` takes a
-  document that exists, `publish` makes one. The message says which to run.
+- **No such document.** Refused: `sync` takes a document that exists,
+  `publish` makes one. The message says which to run.
 - **The editor's temporary files.** Vim's swap and backup files, Emacs's
   `#paper.typ#`, an editor's `paper.typ~`: the watcher is on the one path,
   and events for any other name are ignored.
@@ -264,9 +253,9 @@ browser's own rule is to stop.
   alone.
 - **Binary assets, other files.** Out of scope. The session is one `Text`,
   and the file map that would make a project of several files is not built
-  (`SPEC-rust.md`, "still not built"). Images beside a typst file are read
-  at render time and published inside the HTML; they are not synced, and
-  a browser in the session cannot see them until the file map exists.
+  (`SPEC-rust.md`, "still not built"). Images beside a typst file are not
+  synced, and since nothing rendered is stored, nobody sees them until the
+  file map exists; see "What the client does not render".
 
 ## What it is not
 
@@ -287,8 +276,8 @@ It is not a general file synchroniser. One file, one document, one session.
 
 ## Steps
 
-1. **The peer.** `yrs`, `tokio-tungstenite`, the message types above, seed
-   and replay, snapshot on request, awareness in and out, reconnect. A test
+1. **The peer.** `yrs`, `tokio-tungstenite`, the message types above,
+   replay, snapshot on request, awareness in and out, reconnect. A test
    runs `serve` in-process, joins two `yrs` peers through it, and checks
    that an insert on one is the text of the other, that the second to join
    replays, and that the log rolls over to a snapshot at `EDIT_LOG_MAX`.
@@ -302,12 +291,12 @@ It is not a general file synchroniser. One file, one document, one session.
    deletion, an edit at either end of the text, an empty base. Then wired
    into the disk-to-session path with `base` bookkeeping, and a test in
    which a browser-shaped peer edits while the file holds a stale copy.
-4. **Publishing.** Render natively, POST with `base_sha`, handle 201, 409 and
-   the outside-publish broadcast. A test publishes through the sync client
-   and checks that a browser-shaped peer would call it "saved": the stored
-   source equals the session's text.
+4. **The checkpoint.** `y-checkpoint` after a file write, debounced. A test
+   writes the file and checks that the manifest gains one entry whose bytes
+   are the document's text, and that a second write of the same text gains
+   none.
 5. **The command.** `clap` subcommand, ownership check, the lock file, the
-   messages above, `--no-publish`, `--interval`. A section in the README
+   messages above, `--interval`. A section in the README
    under "CLI", after "Edit", which opens with what it is not.
 
 Steps 1 and 2 are a day each; step 3 is a day or two, most of it tests; 4
@@ -317,14 +306,10 @@ that is where the doubt is.
 
 ## Open questions
 
-- **Should the session outlive the client?** Today a session ends when the
-  last socket closes, and a sync client that runs all day keeps it alive all
-  day, which is a change in what a browser sees: a document with a long
-  history of updates rather than a fresh seed. The `y-snapshot` rollover
-  keeps the log bounded, so nothing breaks; but a session that lives for
-  weeks is new, and a limit may be wanted.
 - **Cursor positions.** An editor that speaks LSP knows where its cursor is.
   A future sync client could take that over a local socket and put it in
   awareness, so the browser draws a caret for the file. Not now.
-- **Merging an outside publish** into the session rather than stopping, as
-  discussed above. Worth revisiting once the browser has an opinion.
+
+Two questions an earlier draft had here are answered in `SPEC-history.md`:
+the session outlives every peer, because it is the document; and a write
+from outside is merged, because there is nothing else it could be.
