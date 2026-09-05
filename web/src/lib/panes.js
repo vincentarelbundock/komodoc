@@ -78,28 +78,35 @@ export function separators(state) {
 /// comments and every separator in it.
 export function surface(state) {
   const shown = showing(state);
-  return (
-    innerWidth - separators(state) - (shown.comments ? clamp(PANES.sidebar, state) : 0)
-  );
+  return state.width - separators(state) - (shown.comments ? clamp(PANES.sidebar, state) : 0);
 }
 
-/// The comment column, in pixels, within what the rest of the window can spare.
+/// The comment column, in pixels, within what the rest of the window can
+/// spare -- which is what is left after the source and the document have the
+/// least each of them can be read at. A window too narrow for all three used
+/// to leave the comments their full width and crush the document to a strip;
+/// the column is the pane that gives way, down to its own minimum.
 function clampSidebar(width, state) {
   const shown = showing(state);
-  const spare = innerWidth - separators(state) - (shown.source || shown.document ? DOCUMENT_MIN : 0);
-  const ceiling = Math.max(PANES.sidebar.min, Math.min(innerWidth * PANES.sidebar.max, spare));
+  const spare =
+    state.width -
+    separators(state) -
+    (shown.source ? PANES.editor.min : 0) -
+    (shown.document ? DOCUMENT_MIN : 0);
+  const ceiling = Math.max(PANES.sidebar.min, Math.min(state.width * PANES.sidebar.max, spare));
   return Math.round(Math.max(PANES.sidebar.min, Math.min(width, ceiling)));
 }
 
 /// The source's share of the surface, within what both of them can read at.
-/// On a surface too narrow for both minimums the source keeps its own, since a
-/// pane too small to read is not an improvement on a document too small to.
 function clampShare(share, state) {
   const room = surface(state);
   if (room <= 0) return share;
   const floor = PANES.editor.min / room;
-  const ceiling = Math.max(floor, Math.min(PANES.editor.max, (room - DOCUMENT_MIN) / room));
-  return Math.max(floor, Math.min(share, ceiling));
+  const ceiling = Math.min(PANES.editor.max, (room - DOCUMENT_MIN) / room);
+  // On a surface too narrow for both of them the ceiling is under the floor,
+  // and the source is what gives: this is a place for reading a document, and
+  // the source has an arrangement of its own one click away.
+  return Math.min(Math.max(Math.min(share, ceiling), floor), Math.max(ceiling, 0));
 }
 
 /// A pane's size, clamped, in whatever unit that pane is kept in. `state.sizes`
@@ -119,7 +126,7 @@ export function pixels(pane, state) {
 /// it is measured from depends on where the pane sits: the comments are always
 /// last, and the source is on whichever side the reader put it.
 export function sizeAt(pane, x, state) {
-  if (!pane.fraction) return innerWidth - x;
+  if (!pane.fraction) return state.width - x;
   const room = surface(state);
   const width = state.sourceSide === "left" ? x : rightEdge(state) - x;
   return snap(width / room, room);
@@ -143,7 +150,7 @@ export function snapped(pane, size) {
 /// Where this pane's separator sits, for the line that follows the pointer
 /// while it is dragged.
 export function edgeAt(pane, size, state) {
-  if (!pane.fraction) return innerWidth - clampSidebar(size, state);
+  if (!pane.fraction) return state.width - clampSidebar(size, state);
   const width = clampShare(size, state) * surface(state);
   return state.sourceSide === "left" ? width : rightEdge(state) - width;
 }
@@ -166,5 +173,5 @@ export function grows(pane, state) {
 // comments and the separator before them.
 function rightEdge(state) {
   const shown = showing(state);
-  return innerWidth - (shown.comments ? clamp(PANES.sidebar, state) + GRIP : 0);
+  return state.width - (shown.comments ? clamp(PANES.sidebar, state) + GRIP : 0);
 }

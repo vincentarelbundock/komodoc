@@ -588,17 +588,20 @@
   });
   let guide = $state({ shown: false, left: 0, held: false });
   let grabbing = $state(false);
+  // The width the panes are divided out of. Bound rather than read when
+  // something happens to ask: it is what every size below is measured against,
+  // and a measurement taken once is a layout that is right until the window
+  // moves.
+  let width = $state(innerWidth);
 
   // What every measurement below is made against.
-  const panes = $derived({ layout, comments: commentsOpen, editing, sourceSide, sizes });
+  const panes = $derived({ layout, comments: commentsOpen, editing, sourceSide, sizes, width });
   const shown = $derived(showing(panes));
 
-  // Every size is kept within what the window can currently give it, which
-  // changes when the window does and when a pane opens or closes.
-  function fit() {
-    for (const pane of Object.values(PANES)) sizes[pane.key] = clamp(pane, panes);
-  }
-
+  // What the reader asked for is kept; what fits is worked out again every
+  // time it is needed. Writing the fitted size back would make a narrow window
+  // permanent -- drag the window in and the split is squeezed, drag it out and
+  // it stays squeezed, because what was asked for is gone.
   function setSize(pane, size) {
     sizes[pane.key] = clamp(pane, panes, size);
     remember(pane, sizes[pane.key]);
@@ -616,13 +619,11 @@
   function cycleLayout() {
     layout = ARRANGEMENTS[layout].next;
     write(LAYOUT, layout);
-    fit();
   }
 
   function putSourceOn(side) {
     sourceSide = side;
     write(SOURCE_SIDE, side);
-    fit();
   }
 
   // Everything the layout menu offers, named by what was chosen. The menu
@@ -636,7 +637,6 @@
 
   function toggleComments() {
     commentsOpen = !commentsOpen;
-    fit();
   }
 
   /* ------------------------------------------------------------------- boot */
@@ -655,7 +655,6 @@
     });
     session.text.observe(sourceChanged);
     room.send({ type: "y-open" });
-    fit();
     paintPreview();
   }
 
@@ -739,7 +738,7 @@
   }
 </script>
 
-<svelte:window onresize={fit} onkeydown={shortcut} onbeforeunload={beforeUnload} onpagehide={() => session?.leave()} />
+<svelte:window bind:innerWidth={width} onkeydown={shortcut} onbeforeunload={beforeUnload} onpagehide={() => session?.leave()} />
 
 <Nav {me}>
   {#snippet children()}
