@@ -1,0 +1,3 @@
+/* Pico first, then what Komodoc adds to it: the second has to win. */
+@import "./pico.css";
+@import "./komodoc.css";

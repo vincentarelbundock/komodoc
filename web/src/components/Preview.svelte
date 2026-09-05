@@ -1,0 +1,42 @@
+<script>
+  // The document, on its own origin, in a frame.
+  //
+  // Nothing here can touch it: the agent injected into it does the DOM work
+  // and reports back. Anchoring stays on this side -- the agent sends text,
+  // this sends back the offsets to paint.
+  //
+  // Everything arriving from the frame is untrusted. The agent shares an
+  // origin with the document, and a hostile document can rewrite it.
+  let { src, docsOrigin, onmessage, grabbing = false } = $props();
+
+  let frame = $state(null);
+
+  export function tell(message) {
+    if (!docsOrigin || !frame?.contentWindow) return;
+    frame.contentWindow.postMessage({ komodoc: true, ...message }, docsOrigin);
+  }
+
+  function receive(event) {
+    if (!docsOrigin || event.origin !== docsOrigin || event.source !== frame?.contentWindow) return;
+    const message = event.data;
+    if (!message || message.komodoc !== true) return;
+    onmessage(message);
+  }
+</script>
+
+<svelte:window onmessage={receive} />
+
+<section class="viewport">
+  <!-- allow-same-origin refers to the document's own origin, not this one, so
+       the agent can read the document while the document can read nothing
+       here. While a separator is being dragged the frame is deafened: it
+       swallows pointer events while it has them, and the drag would be lost
+       over it. -->
+  <iframe
+    bind:this={frame}
+    title="Document"
+    {src}
+    style:pointer-events={grabbing ? "none" : null}
+    sandbox="allow-same-origin allow-scripts allow-popups allow-forms"
+  ></iframe>
+</section>

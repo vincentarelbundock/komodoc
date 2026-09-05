@@ -9,17 +9,20 @@ examples/.calepin/
 .envrc
 .env
 
-# Copied in by the build: the documentation page is the README.
-src/shell/README.md
+# The reader shell is built from web/ by bun and vite, and the README is
+# copied in beside it: everything under src/shell is a build output that the
+# binary embeds.
+src/shell/
 examples/.venv/
 examples/__marimo__/
 .claude
 
-# Built by `make wasm` and `make typst`: generated, large, and rebuilt from
-# the engine crate. Releases build them before the binary.
-src/shell/wasm/
 # Cargo build output.
 target/
 
 # The Cargo lockfile is committed: this builds a binary, not a library.
 !Cargo.lock
+
+# Installed by bun from web/bun.lock, which is committed: a lockfile is a
+# build input, the tree it installs is not.
+web/node_modules/

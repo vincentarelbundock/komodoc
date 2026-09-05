@@ -291,10 +291,19 @@ async fn shell_routes() {
         })
         .await
         .unwrap();
+    // The pages, and the bundle the reader loads: the bundler decides that
+    // file's name, so this reads it out of the page rather than knowing it.
+    let shell = crate::assets::load_shell(&Configuration::default()).unwrap();
+    let bundle = regex::Regex::new(r#"src="(/assets/[^"]+\.js)""#)
+        .unwrap()
+        .captures(&shell["/reader.html"].text())
+        .expect("the reader page names no bundle")[1]
+        .to_string();
     for (path, want) in [
         ("/", "<!doctype html"),
         (&format!("/docs/{slug}"), "<!doctype html"),
-        ("/anchor.js", "export"),
+        ("/documentation", "<!doctype html"),
+        (bundle.as_str(), "/api/documents/"),
     ] {
         let response = client()
             .get(format!("{}{path}", server.url))
@@ -450,5 +459,70 @@ async fn the_renderer_is_served_as_wasm() {
         raw.len() < 3 * 1024 * 1024,
         "the markdown module is {} bytes; it should be small",
         raw.len()
+    );
+}
+
+/// The next frame of this kind, skipping the peer counts a join broadcasts to
+/// everyone already in the session.
+async fn wait_for(socket: &mut Socket, kind: &str) -> serde_json::Value {
+    for _ in 0..6 {
+        let frame = socket.read().await;
+        if frame["type"] == kind {
+            return frame;
+        }
+    }
+    panic!("no {kind} frame arrived");
+}
+
+// Two people editing the same document see each other: where the other one's
+// caret is, and what they are called. Awareness is relayed to the rest of the
+// session and to nobody else, and never kept -- it describes who is here now,
+// which is worth nothing to whoever arrives next.
+#[tokio::test]
+async fn awareness_reaches_the_other_editors_and_is_not_kept() {
+    let server = new_test_server().await;
+    let slug = text(
+        &crate::tests::edit::publish_with_source(&server.url).await,
+        "slug",
+    );
+
+    // Editing is for whoever may replace the document, so both sockets carry
+    // the publisher, the way the editor in a signed-in browser does.
+    let cookie = format!("Cookie: {}\r\n", session_as(TEST_PUBLISHER));
+    let mut alice = dial_websocket_with(&server.url, &slug, &cookie)
+        .await
+        .expect("alice");
+    let mut bob = dial_websocket_with(&server.url, &slug, &cookie)
+        .await
+        .expect("bob");
+    alice.read().await; // hello
+    bob.read().await;
+
+    alice.write(json!({"type": "y-open"})).await;
+    assert_eq!(alice.read().await["type"], "y-state");
+    bob.write(json!({"type": "y-open"})).await;
+    // Bob is told the session state, and both are told the session grew.
+    wait_for(&mut bob, "y-state").await;
+
+    alice
+        .write(json!({"type": "y-awareness", "update": "AQID"}))
+        .await;
+    let seen = wait_for(&mut bob, "y-awareness").await;
+    assert_eq!(
+        seen["update"], "AQID",
+        "the awareness update was changed on the way through"
+    );
+
+    // A third editor arriving is given the document's state, and nothing about
+    // where anyone's caret was: that is not a fact about the document.
+    let mut carol = dial_websocket_with(&server.url, &slug, &cookie)
+        .await
+        .expect("carol");
+    carol.read().await; // hello
+    carol.write(json!({"type": "y-open"})).await;
+    let state = wait_for(&mut carol, "y-state").await;
+    assert!(
+        !state.to_string().contains("AQID"),
+        "a session remembered a caret: {state}"
     );
 }

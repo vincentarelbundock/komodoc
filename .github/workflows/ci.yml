@@ -16,4 +16,7 @@ jobs:
           components: rustfmt, clippy
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
+      # The pages are Svelte, bundled by vite; the binary embeds what that
+      # build produces, so the tests need it before they can read a page.
+      - uses: oven-sh/setup-bun@v2
       - run: make test

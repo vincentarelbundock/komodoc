@@ -324,7 +324,11 @@ async fn handle(
     }
 
     // --- signing in ------------------------------------------------------
-    if path.starts_with("/auth/") || path == "/api/me" || path == "/api/auth/config" {
+    if path.starts_with("/auth/")
+        || path == "/api/me"
+        || path == "/api/auth/config"
+        || path == "/api/config"
+    {
         if let Some(response) = server
             .handle_auth(
                 &method,
@@ -454,6 +458,8 @@ async fn handle(
             page = "/reader.html".to_string();
         } else if path == "/" {
             page = "/index.html".to_string();
+        } else if path == "/documentation" {
+            page = "/documentation.html".to_string();
         }
     }
     if let Some(asset) = server.shell.get(&page) {
@@ -600,6 +606,20 @@ impl Server {
                         }
                         room.broadcast(&json!({"type": "y-peers", "count": room.editors().await}))
                             .await;
+                    }
+                    // Where everyone's caret is, and what they are called.
+                    // Relayed and not remembered: it describes who is here
+                    // now, so it is worth nothing to whoever arrives next, and
+                    // a session that kept it would be keeping a list of ghosts.
+                    "y-awareness" => {
+                        if incoming.update.is_empty() {
+                            continue;
+                        }
+                        room.broadcast_except(
+                            Some(socket_id),
+                            &json!({"type": "y-awareness", "update": incoming.update}),
+                        )
+                        .await;
                     }
                     "y-update" => {
                         if incoming.update.is_empty() {
@@ -1206,6 +1226,9 @@ impl Server {
             // The client id is public by design; the CLI asks for it so `login`
             // needs no configuration of its own.
             "/api/auth/config" => Some(write_json(200, &json!({"client_id": self.app.client_id}))),
+            // What this deployment will accept, so the upload page can refuse a
+            // 30 MB mistake before it is sent rather than after.
+            "/api/config" => Some(write_json(200, &json!(*self.config))),
             _ => None,
         }
     }

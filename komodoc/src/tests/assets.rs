@@ -1,43 +1,103 @@
 //! What the shell is made of, checked before a browser has to find out.
 
-use crate::assets::{load_shell, module_url, renderers, route_count, typst_module, FONT_ROUTE};
+use crate::assets::{load_shell, module_url, renderers, typst_module};
 use crate::config::Configuration;
 
 fn shell() -> std::collections::HashMap<String, crate::assets::ShellFile> {
     load_shell(&Configuration::default()).expect("the shell loads")
 }
 
+// Every page the server can answer with is in the build. A missing one is not
+// a missing feature but a blank window, and the build is a bundler's output
+// rather than a list kept by hand, so this is where a page that stopped being
+// built is noticed.
 #[test]
-fn the_reader_offers_sign_in() {
+fn every_page_is_built() {
     let shell = shell();
-    assert!(
-        shell["/reader.html"].text().contains("id=\"signIn\""),
-        "reader navigation has no sign-in link"
-    );
-    assert!(
-        shell["/reader.js"].text().contains("me.can_sign_in"),
-        "reader does not use the deployment's sign-in availability"
-    );
+    for page in [
+        "/index.html",
+        "/reader.html",
+        "/documentation.html",
+        "/404.html",
+        "/agent.js",
+    ] {
+        assert!(
+            shell.contains_key(page),
+            "{page} is not in the build; run `make web`"
+        );
+    }
 }
 
+// Each page loads its own bundle, and every asset a page names has to be
+// there: the bundler decides those names, so a page pointing at a file that
+// was not written is a page that does nothing at all.
 #[test]
-fn the_wordmark_font_is_served_and_cached() {
+fn every_asset_a_page_names_is_served() {
     let shell = shell();
-    let css = shell["/komodoc.css"].text();
+    let reference =
+        regex::Regex::new(r#"(?:src|href)="(/assets/[^"]+)""#).expect("a constant pattern");
+    let mut checked = 0;
+    for (route, asset) in &shell {
+        if !route.ends_with(".html") {
+            continue;
+        }
+        for found in reference.captures_iter(&asset.text()) {
+            checked += 1;
+            let wanted = found[1].to_string();
+            assert!(
+                shell.contains_key(&wanted),
+                "{route} names {wanted}, which nothing serves"
+            );
+        }
+    }
+    assert!(checked > 0, "no page named a bundle; the build did not run");
+}
+
+// The bundler names an asset for a digest of its own contents, so one can be
+// kept for a year; a page is rewritten in place by the next build and cannot
+// be, or a browser would hold yesterday's page against today's bundles.
+#[test]
+fn bundles_are_immutable_and_pages_are_not() {
+    let shell = shell();
+    for (route, asset) in &shell {
+        if route.starts_with("/assets/") || route.starts_with("/fonts/") {
+            assert!(
+                asset.immutable,
+                "{route} is named for its contents but is not cached as such"
+            );
+        }
+        if route.ends_with(".html") {
+            assert!(
+                !asset.immutable,
+                "{route} is rewritten by every build and must not be cached for a year"
+            );
+        }
+    }
+}
+
+// The wordmark's font is served from this deployment, never from a font host,
+// so a page still reaches out to nobody.
+#[test]
+fn the_wordmark_font_is_served_from_here() {
+    let shell = shell();
+    let css = shell
+        .iter()
+        .find(|(route, _)| route.starts_with("/assets/") && route.ends_with(".css"))
+        .map(|(_, asset)| asset.text())
+        .expect("the stylesheet is in the build");
     assert!(
-        css.contains(&format!("url(\"{FONT_ROUTE}\")")),
+        css.contains("/fonts/ibm-plex-sans-600.woff2"),
         "the stylesheet does not point at the font route"
     );
-    // Never a font host: a page reaches out to nobody.
     assert!(
         !css.contains("fonts.googleapis") && !css.contains("fonts.gstatic"),
-        "the stylesheet references an external font host"
+        "an external font host"
     );
 
-    let font = shell.get(FONT_ROUTE).expect("the font is served");
+    let font = shell
+        .get("/fonts/ibm-plex-sans-600.woff2")
+        .expect("the font is served");
     assert_eq!(font.kind, "font/woff2");
-    // A font never changes, so it is cached for a year.
-    assert!(font.immutable, "the font should be immutable");
     assert!(
         font.body.starts_with(b"wOF2"),
         "what is served is not a woff2 file"
@@ -51,50 +111,26 @@ fn the_wordmark_font_is_served_and_cached() {
 }
 
 #[test]
-fn the_documentation_screenshot_is_served() {
+fn the_documentation_page_carries_the_readme() {
     let shell = shell();
-    let image = shell
-        .get("/docs/commenting.png")
-        .expect("documentation screenshot has no shell route");
-    assert_eq!(image.kind, "image/png");
+    let page = shell["/documentation.html"].text();
     assert!(
-        image.body.starts_with(b"\x89PNG\r\n\x1a\n"),
-        "documentation screenshot is not a PNG"
+        !page.contains("__README__"),
+        "the README placeholder was not filled in"
+    );
+    assert!(
+        page.contains("<h2"),
+        "the rendered README has no headings to build a contents list from"
     );
 }
 
-// Every module the shell imports has to be served, and a missing one is not a
-// missing feature but a blank page: the browser stops at the failed import and
-// nothing after it runs. Static imports are checked here rather than in a
-// browser.
-#[test]
-fn every_imported_module_is_served() {
-    let shell = shell();
-    let imports = regex::Regex::new(r#"(?m)^import[^"']*["']\.(/[^"']+)["']"#).unwrap();
-    for (route, asset) in &shell {
-        if !route.ends_with(".js") {
-            continue;
-        }
-        for found in imports.captures_iter(&asset.text()) {
-            // Written relative to the shell root, which is how they are served.
-            let wanted = found[1].to_string();
-            assert!(
-                shell.contains_key(&wanted),
-                "{route} imports {wanted}, which nothing serves"
-            );
-        }
-    }
-}
-
-// The renderer the editor previews with is served as WebAssembly and cached
-// for a year, since its bytes only change when the build does.
+// The renderer the editor previews with is served as WebAssembly at a URL that
+// carries a digest of the module, so a browser holding the previous build's
+// copy cannot be handed it: the address changed with the bytes.
 #[test]
 fn the_renderers_are_served_as_wasm() {
     let shell = shell();
     let url = module_url("markdown").expect("this build has no markdown module");
-    // The URL carries a digest of the module, so a browser holding the
-    // previous build's copy cannot be handed it: the address changed with the
-    // bytes.
     assert!(
         url.starts_with("/wasm/markdown.") && url.ends_with(".wasm"),
         "the module URL is {url}"
@@ -113,6 +149,25 @@ fn the_renderers_are_served_as_wasm() {
         "the markdown module is {} bytes",
         module.body.len()
     );
+}
+
+// The reader is told where the renderers are when it is served, so the editor
+// never has to ask and can never ask for a path this build does not serve.
+#[test]
+fn the_reader_is_told_where_the_renderers_are() {
+    let shell = shell();
+    let page = shell["/reader.html"].text();
+    assert!(
+        !page.contains("__MODULES__"),
+        "the module URLs were not substituted into the reader"
+    );
+    for name in ["markdown", "typst"] {
+        let Some(url) = module_url(name) else {
+            continue;
+        };
+        assert!(page.contains(&url), "the reader does not point at {url}");
+        assert!(shell.contains_key(&url), "{url} is named but not served");
+    }
 }
 
 // Typst is optional: `make typst` builds its renderer, and a build without one
@@ -148,36 +203,6 @@ fn typst_is_offered_only_when_it_is_built() {
         .cloned()
         .expect("the typst module is not served");
     assert!(served.kind == "application/wasm" && served.immutable);
-}
-
-// The routed files, plus the three that are added rather than read from the
-// route table: the wordmark's font, the stylesheet a rendered document is
-// dressed in, and the markdown renderer -- with the typst renderer when a
-// build has one.
-#[test]
-fn the_shell_holds_what_the_routes_name() {
-    let added = 3 + usize::from(typst_module().is_some());
-    assert_eq!(shell().len(), route_count() + added);
-}
-
-// The editor is told where the renderers are, so a page never asks for a path
-// this build does not serve -- which is what a fixed path would eventually do,
-// since a module is cached for a year.
-#[test]
-fn the_editor_is_told_where_the_renderers_are() {
-    let shell = shell();
-    let editor = shell["/editor.js"].text();
-    assert!(
-        !editor.contains("__MARKDOWN_WASM__"),
-        "the module URL was not substituted into the editor"
-    );
-    for name in ["markdown", "typst"] {
-        let Some(url) = module_url(name) else {
-            continue;
-        };
-        assert!(editor.contains(&url), "the editor does not point at {url}");
-        assert!(shell.contains_key(&url), "{url} is named but not served");
-    }
 }
 
 // Both the storable formats are the ones the engine can actually render, and

@@ -751,7 +751,7 @@ footer.grid > [role="button"] {
 /* ------------------------------------------------------------------- fonts */
 
 /* IBM Plex Sans, SemiBold, complete and unmodified. SIL OFL 1.1; the licence
-   is in vendor/fonts/OFL.txt. Served from this deployment, never from a font
+   is in fonts/OFL.txt. Served from this deployment, never from a font
    host, so a page still reaches out to nobody. */
 @font-face {
   font-family: "IBM Plex Sans";

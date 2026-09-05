@@ -1,8 +1,9 @@
 # Komodoc. `make` builds the single static binary into dist/.
 #
-# Everything runs through cargo: two crates, one workspace. The engine renders
-# markdown and typst, natively for the command line and as WebAssembly for the
-# editor; komodoc is the binary.
+# Three builds, one binary. The engine crate renders markdown and typst,
+# natively for the command line and as WebAssembly for the editor; the web app
+# in web/ is Svelte, bundled by vite and installed by bun; komodoc embeds both
+# and serves them.
 
 # Local settings, kept out of the repository: the GitHub OAuth app and who may
 # publish. Copy .env.example to .env and fill it in. Values are read as Make
@@ -17,12 +18,15 @@ WASM    := src/shell/wasm/markdown.wasm
 # Optional, and built separately by `make typst`: see the bottom of this file.
 TYPST   := src/shell/wasm/typst.wasm
 MODULE  := target/wasm32-unknown-unknown/wasm/komodoc_engine.wasm
+# The pages. src/shell is entirely a build output, so it is an input to
+# nothing: what the pages are built from lives in web/.
+SHELL_OUT := src/shell/index.html
+WEB     := $(shell find web/src web/public -type f) $(wildcard web/*.html web/package.json web/vite.config.js)
 # The renderers are generated, so they are not also inputs to themselves.
-SOURCES := $(filter-out $(WASM) $(TYPST),\
-  $(shell find src engine komodoc -type f -not -path '*/target/*')) Cargo.toml README.md
+SOURCES := $(shell find engine komodoc -type f -not -path '*/target/*') Cargo.toml README.md
 
 .DEFAULT_GOAL := help
-.PHONY: help build test serve seed examples kill clean snapshot wasm typst fmt
+.PHONY: help build test serve seed examples kill clean snapshot wasm typst fmt web
 
 help:  ## Display this help screen
 	@printf "\033[1mAvailable commands:\033[0m\n\n"
@@ -30,8 +34,8 @@ help:  ## Display this help screen
 
 build: $(BIN)  ## Build dist/komodoc, with the shell and renderers embedded
 
-# Rebuilt whenever any source or shell file changes.
-$(BIN): $(SOURCES) $(WASM)
+# Rebuilt whenever any source, page or renderer changes.
+$(BIN): $(SOURCES) $(WASM) $(SHELL_OUT)
 	@mkdir -p $(dir $@)
 	@cargo build --release -p komodoc
 	@cp target/release/komodoc $@
@@ -43,9 +47,10 @@ $(BIN) test: src/shell/README.md
 src/shell/README.md: README.md
 	@cp $< $@
 
-test: $(WASM)  ## Run rustfmt, clippy and the test suite
+# The suite reads the built shell -- a test that asserts a page names its own
+# bundle needs that bundle to exist -- so the pages are built first.
+test: $(WASM) $(SHELL_OUT)  ## Run rustfmt, clippy and the test suite
 	@cargo fmt --check
-	@for file in src/shell/*.js src/worker/*.js; do [ -e "$$file" ] && node --check "$$file" || true; done
 	@cargo clippy --workspace --all-targets -- -D warnings
 	@cargo test --workspace
 
@@ -54,12 +59,12 @@ fmt:  ## Format every crate
 
 # Release builds are described in .github/workflows/release.yml and run when a
 # v* tag is pushed. This does the same thing locally, without tagging.
-snapshot: $(WASM) $(TYPST)  ## Build the release binary locally, without tagging
+snapshot: $(WASM) $(TYPST) $(SHELL_OUT)  ## Build the release binary locally, without tagging
 	@cargo build --release -p komodoc
 	@echo "target/release/komodoc"
 
 clean:  ## Remove build output
-	@rm -rf dist target/release/komodoc
+	@rm -rf dist target/release/komodoc src/shell web/node_modules
 
 # The port is fixed because the GitHub OAuth app's callback URL names it.
 PORT       ?= 8081
@@ -125,6 +130,17 @@ kill:  ## Stop a server started with make serve
 # no GitHub OAuth app and no `komodoc login`.
 deploy: seed  ## Seed the examples and serve them on this machine, no sign-in
 	@$(MAKE) serve PUBLISHERS=anyone COMMENTERS=anyone
+
+# --- the web app -----------------------------------------------------------
+#
+# Svelte, CodeMirror and Yjs, bundled into the pages the binary embeds. The
+# output goes to src/shell, so nothing under that directory is edited by hand.
+
+web: $(SHELL_OUT)  ## Build the pages from web/
+
+$(SHELL_OUT): $(WEB) src/shell/README.md
+	@command -v bun >/dev/null || { echo "bun is not installed: https://bun.sh"; exit 1; }
+	@cd web && bun install --silent && bun run build
 
 # --- the browser renderers -------------------------------------------------
 #
