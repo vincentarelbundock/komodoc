@@ -4,7 +4,7 @@
   // The address bar already holds the link; the button spares the reader from
   // selecting it. The icon turns into a tick for a moment, since a copy is
   // otherwise invisible.
-  let { href = null, label = "Copy link" } = $props();
+  let { href = null, label = "Copy link", tone = null } = $props();
   let done = $state(false);
   let timer;
 
@@ -23,6 +23,7 @@
 <IconButton
   icon={done ? "check" : "link"}
   {label}
-  tone={done ? "outline done" : "outline"}
+  tone={tone ?? "outlined"}
+  colour={done ? "text-success-500" : null}
   onclick={copy}
 />

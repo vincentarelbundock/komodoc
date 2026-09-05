@@ -440,6 +440,7 @@
                       <CopyLink
                         href={new URL(`/docs/${doc.slug}`, location.origin).href}
                         label="Copy the link to {doc.title}"
+                        tone="plain"
                       />
                     </Row>
                   </td>

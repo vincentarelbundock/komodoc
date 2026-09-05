@@ -18,3 +18,19 @@
 /* Where to look for the classes actually used, since the pages are Svelte
    components rather than files Tailwind scans by default. */
 @source "../**/*.{svelte,js,html}";
+
+/* One switch decides light or dark, and this is it.
+ *
+ * Two mechanisms were disagreeing. The colours are written as light/dark
+ * pairs, which resolve by the page's color-scheme -- pinned to light, because
+ * a document in the frame carries its own white page. Tailwind's `dark`
+ * variant is separate, and defaults to the reader's operating system: on a
+ * machine set to dark, Skeleton's typography took its dark colours while
+ * every surface stayed light, which is how the links on the landing page
+ * ended up pale sage on near-white -- 2.3:1, where 4.5:1 is the least that
+ * reads comfortably.
+ *
+ * Pointing the variant at the theme rather than at the operating system makes
+ * the two agree. Shipping a dark theme later is then one attribute, and both
+ * follow it together. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
