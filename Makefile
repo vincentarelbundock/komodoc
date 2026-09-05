@@ -50,6 +50,7 @@ src/shell/README.md: README.md
 # The suite reads the built shell -- a test that asserts a page names its own
 # bundle needs that bundle to exist -- so the pages are built first.
 test: $(WASM) $(SHELL_OUT)  ## Run rustfmt, clippy and the test suite
+	@cd web && bun run check
 	@cargo fmt --check
 	@cargo clippy --workspace --all-targets -- -D warnings
 	@cargo test --workspace

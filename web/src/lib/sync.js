@@ -77,22 +77,60 @@ function findOnce(haystack, needle) {
   return null;
 }
 
+// How far to look for something findable when the caret is somewhere that has
+// no words of its own. Three lines either way reaches the paragraph around a
+// formula, a fenced block, or the blank line between two paragraphs, and stops
+// well short of a different section.
+const NEARBY_LINES = 3;
+
+// The places worth trying, nearest first: where the caret actually is, then
+// the start of each line around it. A caret on a blank line, in a formula or
+// in a code fence has nothing to match on -- but the prose beside it does, and
+// that is what the reader is looking at.
+function* nearby(text, caret) {
+  yield caret;
+  const starts = [];
+  for (let at = 0; at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at === 0 ? 0 : at + 1);
+  const here = starts.findIndex((start, index) => start <= caret && (starts[index + 1] ?? Infinity) > caret);
+  if (here === -1) return;
+  for (let step = 1; step <= NEARBY_LINES; step++) {
+    // Backwards first: a formula or a fence belongs to the prose that
+    // introduced it more often than to what follows.
+    if (starts[here - step] !== undefined) yield starts[here - step];
+    if (starts[here + step] !== undefined) yield starts[here + step];
+  }
+}
+
 // Where in the document the caret in the source is pointing. `rendered` is the
 // text the frame published; the offset returned is into that text, which is
 // what the frame anchors everything else by.
 export function documentPlaceFor(source, caret, rendered) {
-  const wanted = phrase(source, caret, true);
-  if (!wanted) return null;
   // The rendered text is searched flattened, and flattening only ever replaces
   // one character with one space, so the offset means the same in both.
-  return findOnce(flatten(rendered), wanted);
+  const haystack = flatten(rendered);
+  for (const at of nearby(source, caret)) {
+    const wanted = phrase(source, at, true);
+    if (!wanted) continue;
+    const found = findOnce(haystack, wanted);
+    if (found) return found;
+  }
+  return null;
 }
 
 // And the other way: where in the source a place in the document is, as an
-// offset for a caret rather than a scroll.
+// offset for a caret rather than a scroll. The rendered text has no lines to
+// speak of -- it is one long run -- so what is tried instead is a little
+// further along it each time, which lands past whatever could not be matched.
 export function sourcePlaceFor(rendered, at, source) {
-  const wanted = phrase(rendered, at, false);
-  if (!wanted) return null;
-  const found = findOnce(flatten(source), wanted);
-  return found ? found.at : null;
+  const haystack = flatten(source);
+  for (let step = 0; step <= NEARBY_LINES; step++) {
+    for (const from of step === 0 ? [at] : [at - step * WINDOW, at + step * WINDOW]) {
+      if (from < 0 || from >= rendered.length) continue;
+      const wanted = phrase(rendered, from, false);
+      if (!wanted) continue;
+      const found = findOnce(haystack, wanted);
+      if (found) return found.at;
+    }
+  }
+  return null;
 }

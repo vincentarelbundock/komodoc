@@ -449,14 +449,22 @@
 
   /* ------------------------------------------------------- keeping in step */
 
-  const NO_MATCH = "no matching passage — the two are still linked";
+  // Said when the lock has nowhere to go: the words at the caret, and the words
+  // around them, are in neither the document nor the source. That is rare now
+  // that it looks beside the line as well as at it -- a formula, a blank line
+  // and a fenced block all resolve to the prose next to them -- so when it does
+  // happen it is worth one plain line rather than an alarm. Nothing is broken:
+  // the lock is on and the next move will try again.
+  const NO_MATCH = "nothing to jump to here";
 
   function lost(yes) {
     if (!yes) {
       if (state === NO_MATCH) say(dirty ? "unsaved changes" : "saved");
       return;
     }
-    say(NO_MATCH, true);
+    // Not a problem: the editor is in the state it was in, and the reader has
+    // lost nothing. It is a fact about where the caret happens to be.
+    say(NO_MATCH);
   }
 
   let stepTimer = null;
