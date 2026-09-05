@@ -1,0 +1,143 @@
+/* The Komodoc theme.
+ *
+ * Skeleton asks a theme for eleven stops of each colour and derives the rest
+ * -- the contrast text, and the light/dark pairs -- from them. So this file is
+ * the whole of the palette, and the only place in the application where a
+ * colour is written down.
+ *
+ * The four that matter are the ones Komodoc already had:
+ * colorhunt.co/palette/9cb0806187642b5748273338. Pine carries every
+ * affordance, moss is the same colour with more light in it, sage is what a
+ * highlight is tinted with, and slate is the ink and the panels. Each ramp is
+ * that colour mixed evenly towards white and black, so a shade is always the
+ * same hue rather than a new decision.
+ */
+
+[data-theme="komodoc"] {
+	/* Light, for now. Every colour below has its dark counterpart and the
+	   application is written in light/dark pairs throughout, so turning this to
+	   `light dark` is the whole of the change -- but a document in the frame
+	   carries its own white page, and what a dark shell around it should look
+	   like is a question nobody has answered yet. */
+	color-scheme: light;
+
+	/* primary: #2b5748 */
+	--color-primary-50: #f2f5f4;
+	--color-primary-100: #e1e7e5;
+	--color-primary-200: #bbc9c4;
+	--color-primary-300: #8fa69e;
+	--color-primary-400: #608176;
+	--color-primary-500: #2b5748;
+	--color-primary-600: #24483c;
+	--color-primary-700: #1c3930;
+	--color-primary-800: #152a23;
+	--color-primary-900: #0e1c17;
+	--color-primary-950: #09110e;
+
+	/* secondary: #618764 */
+	--color-secondary-50: #f6f8f6;
+	--color-secondary-100: #e9eee9;
+	--color-secondary-200: #ccd9cd;
+	--color-secondary-300: #abbfad;
+	--color-secondary-400: #89a58b;
+	--color-secondary-500: #618764;
+	--color-secondary-600: #517053;
+	--color-secondary-700: #405942;
+	--color-secondary-800: #2f4130;
+	--color-secondary-900: #1f2b20;
+	--color-secondary-950: #131b14;
+
+	/* tertiary: #9cb080 */
+	--color-tertiary-50: #f9faf7;
+	--color-tertiary-100: #f1f4ed;
+	--color-tertiary-200: #dfe6d6;
+	--color-tertiary-300: #cbd5bc;
+	--color-tertiary-400: #b5c4a0;
+	--color-tertiary-500: #9cb080;
+	--color-tertiary-600: #81926a;
+	--color-tertiary-700: #677454;
+	--color-tertiary-800: #4b543d;
+	--color-tertiary-900: #323829;
+	--color-tertiary-950: #1f231a;
+
+	/* success: #3f7d5c */
+	--color-success-50: #f3f7f5;
+	--color-success-100: #e4ede8;
+	--color-success-200: #c2d5cb;
+	--color-success-300: #99baa9;
+	--color-success-400: #6f9e85;
+	--color-success-500: #3f7d5c;
+	--color-success-600: #34684c;
+	--color-success-700: #2a523d;
+	--color-success-800: #1e3c2c;
+	--color-success-900: #14281d;
+	--color-success-950: #0d1912;
+
+	/* warning: #b07d3a */
+	--color-warning-50: #faf7f3;
+	--color-warning-100: #f4ede3;
+	--color-warning-200: #e6d5c0;
+	--color-warning-300: #d5ba97;
+	--color-warning-400: #c49e6b;
+	--color-warning-500: #b07d3a;
+	--color-warning-600: #926830;
+	--color-warning-700: #745226;
+	--color-warning-800: #543c1c;
+	--color-warning-900: #382813;
+	--color-warning-950: #23190c;
+
+	/* error: #a33f3f */
+	--color-error-50: #f9f3f3;
+	--color-error-100: #f2e4e4;
+	--color-error-200: #e2c2c2;
+	--color-error-300: #ce9999;
+	--color-error-400: #ba6f6f;
+	--color-error-500: #a33f3f;
+	--color-error-600: #873434;
+	--color-error-700: #6c2a2a;
+	--color-error-800: #4e1e1e;
+	--color-error-900: #341414;
+	--color-error-950: #210d0d;
+
+	/* surface: #273338 */
+	--color-surface-50: #f2f3f3;
+	--color-surface-100: #e1e2e3;
+	--color-surface-200: #babebf;
+	--color-surface-300: #8d9396;
+	--color-surface-400: #5d666a;
+	--color-surface-500: #273338;
+	--color-surface-600: #202a2e;
+	--color-surface-700: #1a2225;
+	--color-surface-800: #13181b;
+	--color-surface-900: #0c1012;
+	--color-surface-950: #080a0b;
+
+	/* One typeface for the interface and one for a source, and the wordmark
+	   is the only thing set in IBM Plex. A document in the frame carries its
+	   own, from the engine, and is not styled from here. */
+	--typo-base--font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+	--typo-heading--font-family: var(--typo-base--font-family);
+	--typo-heading--font-weight: 650;
+	--typo-anchor--color-light: var(--color-primary-500);
+	--typo-anchor--color-dark: var(--color-primary-300);
+	--typo-anchor--text-decoration-line: none;
+	--typo-anchor--hover--text-decoration-line: underline;
+
+	/* The page itself: the lightest surface, so a document in the frame -- which
+	   is white and carries its own styles -- sits on something a shade quieter
+	   rather than on more of itself. */
+	--color-root-bg-light: var(--color-surface-50);
+	--color-root-bg-dark: var(--color-surface-950);
+
+	/* The height of the bar, which the reader sizes its panes against: the
+	   window less this is exactly what the panes have. */
+	--komodoc-bar: 3.5rem;
+
+	/* The spacing step everything is measured in, and a corner radius quiet
+	   enough that a row of controls reads as a row rather than as a row of
+	   pills. */
+	--spacing: 0.25rem;
+	--radius-base: 0.375rem;
+	--radius-container: 0.5rem;
+	--text-scaling: 1;
+}

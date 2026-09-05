@@ -1,15 +1,17 @@
 <script>
   import Nav from "./Nav.svelte";
+  import Page from "./layout/Page.svelte";
+  import Stack from "./layout/Stack.svelte";
 </script>
 
 <Nav />
-<main class="container">
-  <hgroup>
-    <h1>Nothing here</h1>
-    <p>
-      This link does not point at a document on this deployment. It may have
-      been deleted, it may have expired, or the address may have been mistyped.
+<Page>
+  <Stack gap={4}>
+    <h1 class="h2">Nothing here</h1>
+    <p class="text-surface-600-400">
+      This link does not point at a document on this deployment. It may have been deleted, it may
+      have expired, or the address may have been mistyped.
     </p>
-  </hgroup>
-  <p><a href="/">Go to the document list</a></p>
-</main>
+    <a class="anchor" href="/">Go to the document list</a>
+  </Stack>
+</Page>

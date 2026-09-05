@@ -1,14 +1,21 @@
 <script>
+  import { Tooltip } from "@skeletonlabs/skeleton-svelte";
   import Icon from "./Icon.svelte";
 
-  // One button, one shape. Every icon control on the bar is this, so they are
-  // the same square, on the same line, with the icon at the same size --
-  // rather than each place that wants one repeating a string of classes and
-  // the stylesheet reaching down through whatever ancestor it happens to
-  // have. That is what had three of them sitting on three different lines.
+  // One button, one shape. Every icon control in the application is this, so
+  // they are the same square with the icon at the same size, rather than each
+  // place that wants one deciding again.
   //
-  // A control that navigates is a link and a control that acts is a button.
-  // Both are drawn here, so the two cannot end up looking different.
+  // Three weights, which is the whole vocabulary: filled for the one action
+  // that changes the document, tonal for a state that is on, outlined for
+  // everything else -- and plain for a control that sits inside something
+  // else's frame, like a row of a table, where a border would draw a box
+  // around nothing.
+  //
+  // An icon without a word beside it has to say what it is. A title attribute
+  // says it only to a mouse, after a wait the browser chooses, in a box the
+  // page has no say over; this says it to the keyboard too, promptly, in the
+  // application's own colours.
   let {
     icon,
     label,
@@ -16,92 +23,49 @@
     href = null,
     pressed = null,
     disabled = false,
-    tone = "outline",
+    tone = null,
+    size = null,
+    colour = null,
     onclick,
   } = $props();
+
+  const TONES = {
+    filled: "preset-filled-primary-500",
+    tonal: "preset-tonal-primary",
+    outlined: "preset-outlined-surface-300-700",
+    plain: "",
+  };
+  const preset = $derived(TONES[tone] ?? (pressed === true ? TONES.tonal : TONES.outlined));
+  const classes = $derived(`btn-icon ${size ?? ""} ${preset} ${colour ?? ""}`);
 </script>
 
-{#if href}
-  <a {href} class="control {tone}" aria-label={label} {title} role="button">
-    <Icon name={icon} />
-  </a>
-{:else}
-  <button
-    type="button"
-    class="control {tone}"
-    aria-label={label}
-    {title}
-    aria-pressed={pressed === null ? undefined : pressed}
-    {disabled}
-    {onclick}
-  >
-    <Icon name={icon} />
-  </button>
-{/if}
-
-<style>
-  /* The size of every control on the bar, and the only place it is decided.
-     Pico gives a button inside a [role=group] different metrics from a loose
-     one, which is what had the pane toggles sitting eight pixels above their
-     neighbours. */
-  .control {
-    box-sizing: border-box;
-    /* Never shrinks: a control is the size it is, and a row that is short of
-       room scrolls rather than squeezing its buttons into slivers. */
-    flex: none;
-    width: var(--komodoc-control, 2rem);
-    height: var(--komodoc-control, 2rem);
-    padding: 0;
-    margin: 0;
-    display: inline-grid;
-    place-items: center;
-    line-height: 1;
-    border-radius: var(--pico-border-radius);
-    border: 1px solid transparent;
-    cursor: pointer;
-  }
-  .control:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  /* Outlined by default: an icon on the bar is an option, not a call to
-     action, so it carries the weight of one. */
-  .outline {
-    background: transparent;
-    border-color: var(--pico-muted-border-color);
-    color: var(--pico-color);
-  }
-  .outline:hover:not(:disabled) {
-    border-color: var(--pico-primary);
-    color: var(--pico-primary);
-  }
-  /* Pressed is a state of the page rather than of the pointer, so it stays
-     lit once it is. */
-  .outline[aria-pressed="true"] {
-    border-color: var(--pico-primary);
-    color: var(--pico-primary);
-    background: color-mix(in srgb, var(--pico-primary) 10%, transparent);
-  }
-  /* The one control on the bar that changes the document rather than the view
-     of it. */
-  .primary {
-    background: var(--pico-primary-background);
-    border-color: var(--pico-primary-border);
-    color: var(--pico-primary-inverse);
-  }
-  .primary:hover:not(:disabled) {
-    background: var(--pico-primary-hover-background);
-  }
-  .primary:disabled {
-    background: var(--pico-secondary-background);
-    border-color: var(--pico-secondary-border);
-  }
-  /* A copy leaves nothing visible behind, so the icon itself is the receipt. */
-  .done {
-    border-color: var(--pico-ins-color);
-    color: var(--pico-ins-color);
-  }
-  a.control {
-    text-decoration: none;
-  }
-</style>
+<Tooltip openDelay={400} closeDelay={100} positioning={{ placement: "bottom" }}>
+  <!-- The trigger is the control itself rather than a wrapper around it: an
+       element in between would break the row the controls sit in. -->
+  <Tooltip.Trigger>
+    {#snippet element(attributes)}
+      {#if href}
+        <a {...attributes} {href} class={classes} aria-label={label} role="button">
+          <Icon name={icon} />
+        </a>
+      {:else}
+        <button
+          {...attributes}
+          type="button"
+          class={classes}
+          aria-label={label}
+          aria-pressed={pressed === null ? undefined : pressed}
+          {disabled}
+          {onclick}
+        >
+          <Icon name={icon} />
+        </button>
+      {/if}
+    {/snippet}
+  </Tooltip.Trigger>
+  <Tooltip.Positioner class="z-50">
+    <Tooltip.Content class="card preset-filled-surface-950-50 px-2 py-1 text-xs shadow-lg">
+      {title}
+    </Tooltip.Content>
+  </Tooltip.Positioner>
+</Tooltip>

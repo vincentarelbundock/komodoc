@@ -258,24 +258,41 @@ fn no_page_mounts_itself_into_a_wrapper() {
     );
 }
 
-// Every icon control is one component, so they are one square with the icon at
-// one size. The alternative -- a string of classes at each call site, sized by
-// a rule keyed to whichever ancestor that control happens to have -- is what
-// had the bar's buttons sitting on three different lines with four different
-// icon sizes, and no single rule was wrong about any of it.
+// The pages are built from the design system rather than from decisions made
+// one at a time. Skeleton supplies the furniture and the theme colours it, so
+// what this checks is that the pages actually go through them: the vocabulary
+// is present, and the ancestor-keyed rules that used to size controls from
+// four levels up are gone for good.
+//
+// The rule that a page writes no colour or size of its own is checked over the
+// sources instead, by web/scripts/check-vocabulary.js, where the source is.
 #[test]
-fn one_component_draws_every_icon_control() {
+fn the_pages_are_built_from_the_design_system() {
     let css = stylesheets();
-    for orphan in [".navtools .iconbtn", "ul.navmid svg"] {
+
+    // The furniture comes from Skeleton.
+    for utility in [".btn-icon", ".card", ".input", ".table"] {
         assert!(
-            !css.contains(orphan),
-            "{orphan} sizes a control from outside the component that draws it"
+            css.contains(utility),
+            "{utility} is missing; the pages are not using the system"
         );
     }
 
-    // And the box every one of them shares comes from one variable.
+    // And the colour comes from the theme, which is the only place a palette
+    // is written down.
     assert!(
-        css.contains("--komodoc-control"),
-        "no control size in the bundles; the buttons are sized somewhere else again"
+        // The bundler drops the quotes an attribute selector was written with.
+        css.contains("--color-primary-500") && css.contains("data-theme=komodoc"),
+        "the Komodoc theme is not in the build"
     );
+
+    // The rules that used to size a control from whichever ancestor it
+    // happened to have. Each was correct on its own and none of them covered
+    // every control, which is how the bar ended up on three lines.
+    for orphan in [".navtools .iconbtn", "ul.navmid svg", "--pico-"] {
+        assert!(
+            !css.contains(orphan),
+            "{orphan} is back: a control sized from outside the component that draws it"
+        );
+    }
 }

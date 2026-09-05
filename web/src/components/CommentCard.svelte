@@ -1,4 +1,5 @@
 <script>
+  import Row from "./layout/Row.svelte";
   import { AUTHOR, read, write } from "../lib/storage.js";
 
   // One annotation, and everything said about it.
@@ -45,8 +46,7 @@
   const stamp = (value) => (value || "").replace("T", " ").slice(0, 16) + " UTC";
 
   // The one line a resolved card shows: what it was about, then what was said
-  // about it. Trimmed to a line by CSS rather than by cutting the text, so the
-  // width of the column decides how much of it fits.
+  // about it.
   const summary = $derived(
     [
       comment.region ? `Figure ${comment.region.image_index + 1}` : (comment.exact || "").trim(),
@@ -77,72 +77,141 @@
 </script>
 
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-<article id="comment-{comment.id}"
-         class:resolved={comment.resolved || comment.pending}
-         class:collapsed
-         onclick={click}>
+<article
+  id="comment-{comment.id}"
+  class="card cursor-pointer p-3 {comment.resolved || comment.pending
+    ? 'preset-outlined-surface-200-800 opacity-70'
+    : 'preset-outlined-surface-300-700'}"
+  class:collapsed
+  onclick={click}
+>
   {#if collapsed}
     <div class="summary">{summary}</div>
   {:else}
-    {#if comment.orphaned}<mark>Needs re-anchoring</mark>{/if}
-    <!-- The motivation is the W3C annotation type. Commenting is the default,
-         so only the others are worth showing. -->
-    {#if comment.motivation && comment.motivation !== "commenting"}
-      <mark data-motivation={comment.motivation}>{comment.motivation}</mark>
-    {/if}
+    <div class="flex flex-col gap-2">
+      <Row gap={1} wrap>
+        {#if comment.orphaned}
+          <span class="badge preset-tonal-warning">Needs re-anchoring</span>
+        {/if}
+        <!-- The motivation is the W3C annotation type. Commenting is the
+             default, so only the others are worth showing. -->
+        {#if comment.motivation && comment.motivation !== "commenting"}
+          <span class="badge preset-tonal-tertiary">{comment.motivation}</span>
+        {/if}
+      </Row>
 
-    {#if comment.region}
-      <blockquote class="figureref">Figure {comment.region.image_index + 1}</blockquote>
-    {:else if long}
-      <blockquote>
-        <span>{quoteOpen ? `“${comment.exact}”` : `“${short}`}</span>
-        <!-- svelte-ignore a11y_invalid_attribute -->
-        <a href="#" onclick={(e) => { e.preventDefault(); e.stopPropagation(); quoteOpen = !quoteOpen; }}>
-          {quoteOpen ? " less" : "… ”"}
-        </a>
-      </blockquote>
-    {:else}
-      <blockquote>“{comment.exact}”</blockquote>
-    {/if}
+      {#if comment.region}
+        <blockquote class="figureref text-surface-600-400 text-sm">
+          Figure {comment.region.image_index + 1}
+        </blockquote>
+      {:else if long}
+        <blockquote class="border-primary-500 text-surface-700-300 border-l-2 pl-3 text-sm">
+          <span>{quoteOpen ? `“${comment.exact}”` : `“${short}`}</span>
+          <!-- svelte-ignore a11y_invalid_attribute -->
+          <a
+            href="#"
+            class="anchor"
+            onclick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              quoteOpen = !quoteOpen;
+            }}
+          >
+            {quoteOpen ? " less" : "… ”"}
+          </a>
+        </blockquote>
+      {:else}
+        <blockquote class="border-primary-500 text-surface-700-300 border-l-2 pl-3 text-sm">
+          “{comment.exact}”
+        </blockquote>
+      {/if}
 
-    {#if comment.body}<p>{comment.body}</p>{/if}
-    {#each comment.tags || [] as tag}
-      <button type="button" class="tag" onclick={(e) => { e.stopPropagation(); ontoggleTag?.(tag); }}>{tag}</button>
-    {/each}
-    <small>{comment.creator} · {stamp(comment.created)}</small>
+      {#if comment.body}<p class="text-sm">{comment.body}</p>{/if}
 
-    {#if comment.replies?.length}
-      <ul>
-        {#each comment.replies as reply (reply.id)}
-          <li>
-            <span>{reply.body}</span><br />
-            <small>{reply.creator} · {stamp(reply.created)}</small>
-          </li>
-        {/each}
-      </ul>
-    {/if}
+      {#if comment.tags?.length}
+        <Row gap={1} wrap>
+          {#each comment.tags as tag}
+            <button
+              type="button"
+              class="chip preset-outlined-surface-300-700 text-xs"
+              onclick={(e) => {
+                e.stopPropagation();
+                ontoggleTag?.(tag);
+              }}
+            >
+              {tag}
+            </button>
+          {/each}
+        </Row>
+      {/if}
+
+      <small class="text-surface-500 text-xs">{comment.creator} · {stamp(comment.created)}</small>
+
+      {#if comment.replies?.length}
+        <ul class="border-surface-200-800 flex flex-col gap-2 border-l pl-3">
+          {#each comment.replies as reply (reply.id)}
+            <li class="text-sm">
+              <span>{reply.body}</span><br />
+              <small class="text-surface-500 text-xs">{reply.creator} · {stamp(reply.created)}</small>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
   {/if}
 
-  <!-- Not role="group": that is Pico's segmented control, which joins its
-       buttons into one shape. These are separate actions. -->
-  <div class="actions">
-    <button type="button" onclick={(e) => { e.stopPropagation(); expanded = false; onresolve?.(comment); }}>
+  <Row gap={1} justify="end">
+    <button
+      type="button"
+      class="btn btn-sm preset-outlined-surface-300-700"
+      onclick={(e) => {
+        e.stopPropagation();
+        expanded = false;
+        onresolve?.(comment);
+      }}
+    >
       {comment.resolved ? "Reopen" : "Resolve"}
     </button>
-    <button type="button" onclick={(e) => { e.stopPropagation(); replying = !replying; }}>Reply</button>
+    <button
+      type="button"
+      class="btn btn-sm preset-outlined-surface-300-700"
+      onclick={(e) => {
+        e.stopPropagation();
+        replying = !replying;
+      }}
+    >
+      Reply
+    </button>
     {#if deletable}
-      <button type="button" onclick={(e) => { e.stopPropagation(); ondelete?.(comment); }}>Delete</button>
+      <button
+        type="button"
+        class="btn btn-sm preset-outlined-error-500"
+        onclick={(e) => {
+          e.stopPropagation();
+          ondelete?.(comment);
+        }}
+      >
+        Delete
+      </button>
     {/if}
-  </div>
+  </Row>
 
   {#if replying}
-    <form onsubmit={submitReply}>
+    <form class="mt-3 flex flex-col gap-2" onsubmit={submitReply}>
       {#if !identity}
-        <input placeholder="Name" maxlength="80" bind:value={replyName} />
+        <input class="input" placeholder="Name" maxlength="80" bind:value={replyName} />
       {/if}
       <!-- svelte-ignore a11y_autofocus -->
-      <textarea placeholder="Reply" rows="2" maxlength="5000" required autofocus bind:value={replyBody}></textarea>
-      <button type="submit">Add reply</button>
+      <textarea
+        class="textarea"
+        placeholder="Reply"
+        rows="2"
+        maxlength="5000"
+        required
+        autofocus
+        bind:value={replyBody}
+      ></textarea>
+      <button type="submit" class="btn btn-sm preset-filled-primary-500 self-end">Add reply</button>
     </form>
   {/if}
 </article>

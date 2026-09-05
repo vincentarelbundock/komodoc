@@ -6,6 +6,7 @@
 // by taking that over in JavaScript.
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import tailwindcss from "@tailwindcss/vite";
 import { resolve } from "node:path";
 import { rmSync } from "node:fs";
 
@@ -24,7 +25,7 @@ const clearOwnOutput = {
 };
 
 export default defineConfig({
-  plugins: [clearOwnOutput, svelte()],
+  plugins: [clearOwnOutput, tailwindcss(), svelte()],
   // The pages are served from the site root by the Go-free Rust server, which
   // knows nothing about this build beyond where the files are.
   base: "/",

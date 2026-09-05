@@ -14,6 +14,10 @@
   import IconButton from "./IconButton.svelte";
   import ControlGroup from "./ControlGroup.svelte";
   import CopyLink from "./CopyLink.svelte";
+  import Modal from "./Modal.svelte";
+  import Toasts from "./Toasts.svelte";
+  import Row from "./layout/Row.svelte";
+  import { problem as toastProblem } from "../lib/toast.svelte.js";
   import Preview from "./Preview.svelte";
   import Grip from "./Grip.svelte";
   import Sidebar from "./Sidebar.svelte";
@@ -179,9 +183,9 @@
 
   /* -------------------------------------------------------------- annotating */
 
-  let dialog = $state(null);
-  let identityDialog = $state(null);
-  let deleteDialog = $state(null);
+  let commenting = $state(false);
+  let identifying = $state(false);
+  let deleting = $state(false);
   let draft = $state({ body: "", tags: "", creator: read(AUTHOR, "Anonymous") });
   let pendingDelete = null;
 
@@ -194,10 +198,10 @@
       return;
     }
     if (!identity && me.can_sign_in) {
-      identityDialog?.showModal();
+      identifying = true;
       return;
     }
-    dialog?.showModal();
+    commenting = true;
   }
 
   function submitAnnotation({ motivation, body, tags }) {
@@ -238,7 +242,7 @@
       tags: draft.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
     });
     draft = { ...draft, body: "", tags: "" };
-    dialog?.close();
+    commenting = false;
   }
 
   function resolve(comment) {
@@ -252,14 +256,14 @@
 
   function askDelete(comment) {
     pendingDelete = comment;
-    deleteDialog.returnValue = "";
-    deleteDialog.showModal();
+    deleting = true;
   }
 
-  function deleteClosed() {
+  function confirmDelete() {
     const comment = pendingDelete;
     pendingDelete = null;
-    if (!comment || deleteDialog.returnValue !== "ok") return;
+    deleting = false;
+    if (!comment) return;
     comments = comments.filter((item) => item !== comment);
     applyHighlights();
     room?.send({ type: "delete", comment_id: comment.id });
@@ -306,7 +310,7 @@
           .then((data) => receive({ type: "hello", comments: data.comments }))
           .catch(() => {});
       }
-      alert(event.message);
+      toastProblem(event.message);
       return;
     }
 
@@ -677,14 +681,16 @@
 
 <Nav {me}>
   {#snippet children()}
-    <li id="docTitle">{doc.title ?? ""}</li>
+    <span id="docTitle" class="text-surface-600-400 truncate text-sm">{doc.title ?? ""}</span>
     <!-- Silent while the socket is up: it only has something to say when the
          live updates have stopped. -->
-    {#if !connected}<li><small id="conn">reconnecting…</small></li>{/if}
+    {#if !connected}
+      <small class="badge preset-tonal-warning whitespace-nowrap">reconnecting…</small>
+    {/if}
   {/snippet}
 
   {#snippet tools()}
-    <li class="navtools">
+    <Row gap={3}>
       <!-- Which panes are showing. A group of its own, separate from the
            annotation tools: these change what you are looking at, not what a
            selection would become. -->
@@ -710,11 +716,17 @@
         <IconButton icon="save" label="Save a new version" title="Save"
                     tone="primary" disabled={!dirty} onclick={save} />
         <!-- Said only when there is more than one person editing. -->
-        {#if peers > 1}<small class="editstate peers">{peers} editing</small>{/if}
-        {#if state}<small class="editstate" class:problem>{state}</small>{/if}
+        {#if peers > 1}
+          <small class="badge preset-tonal-secondary whitespace-nowrap">{peers} editing</small>
+        {/if}
+        {#if state}
+          <small class="badge whitespace-nowrap {problem ? 'preset-tonal-error' : 'preset-tonal-surface'}">
+            {state}
+          </small>
+        {/if}
       {/if}
       <CopyLink label="Copy the link to this document" />
-    </li>
+    </Row>
   {/snippet}
 </Nav>
 
@@ -755,67 +767,99 @@
 </main>
 
 {#if bar.shown}
-  <button id="selectionbar" style="display: block; left: {bar.left}px; top: {bar.top}px" onclick={barClicked}>
+  <button
+    id="selectionbar"
+    class="btn btn-sm preset-filled-primary-500 shadow-lg"
+    style="display: block; left: {bar.left}px; top: {bar.top}px"
+    onclick={barClicked}
+  >
     {tool === "highlighting" ? "Highlight" : tool === "region" ? "Box" : "Comment"}
   </button>
 {/if}
 
-<dialog bind:this={dialog}>
-  <article>
-    <form onsubmit={submitDialog}>
-      <h3>Add comment</h3>
-      <blockquote>
+<!-- What a selection becomes, once the reader has said what to call it and
+     what they think of it. -->
+<Modal bind:open={commenting} title="Add comment">
+  {#snippet children()}
+    <form id="commentForm" class="flex flex-col gap-3" onsubmit={submitDialog}>
+      <blockquote class="border-primary-500 text-surface-700-300 border-l-2 pl-3 text-sm">
         {pending?.region ? `Figure ${pending.region.image_index + 1}` : `“${pending?.exact ?? ""}”`}
       </blockquote>
       {#if identity}
-        <p>commenting as @{identity}</p>
+        <p class="text-surface-600-400 text-sm">commenting as @{identity}</p>
       {:else if me.comments_need_login}
-        <p><a href={signInHref()}>Sign in with GitHub</a> to comment on this document.</p>
+        <p class="text-sm">
+          <a class="anchor" href={signInHref()}>Sign in with GitHub</a> to comment on this document.
+        </p>
       {:else}
-        <label for="author">Name</label>
-        <input id="author" maxlength="80" bind:value={draft.creator} />
+        <label class="label">
+          <span class="label-text">Name</span>
+          <input class="input" maxlength="80" bind:value={draft.creator} />
+        </label>
       {/if}
-      <label for="body">Comment</label>
-      <!-- svelte-ignore a11y_autofocus -->
-      <textarea id="body" rows="5" maxlength="5000" required autofocus bind:value={draft.body}></textarea>
-      <label for="tags">Tags <small>optional, comma separated</small></label>
-      <input id="tags" placeholder="methods, typo, citation" bind:value={draft.tags} />
-      <footer class="grid">
-        <button type="button" class="secondary" onclick={() => dialog.close()}>Cancel</button>
-        <button type="submit" disabled={!identity && me.comments_need_login}>Save</button>
-      </footer>
+      <label class="label">
+        <span class="label-text">Comment</span>
+        <!-- svelte-ignore a11y_autofocus -->
+        <textarea class="textarea" rows="5" maxlength="5000" required autofocus bind:value={draft.body}
+        ></textarea>
+      </label>
+      <label class="label">
+        <span class="label-text">Tags <small class="text-surface-500">optional, comma separated</small></span>
+        <input class="input" placeholder="methods, typo, citation" bind:value={draft.tags} />
+      </label>
     </form>
-  </article>
-</dialog>
+  {/snippet}
+  {#snippet footer()}
+    <button type="button" class="btn preset-outlined-surface-300-700" onclick={() => (commenting = false)}>
+      Cancel
+    </button>
+    <button
+      type="submit"
+      form="commentForm"
+      class="btn preset-filled-primary-500"
+      disabled={!identity && me.comments_need_login}
+    >
+      Save
+    </button>
+  {/snippet}
+</Modal>
 
-<!-- Deleting a thread cannot be undone, so it is confirmed. OK is the form's
-     default button and holds focus: Enter alone confirms. -->
-<dialog bind:this={deleteDialog} onclose={deleteClosed}>
-  <article>
-    <form method="dialog">
-      <h3>Delete comment?</h3>
-      <p>This removes the comment and its replies for everyone. It cannot be undone.</p>
-      <footer class="grid">
-        <button type="submit" value="cancel" class="secondary">Cancel</button>
-        <button type="submit" value="ok" autofocus>OK</button>
-      </footer>
-    </form>
-  </article>
-</dialog>
+<!-- Deleting a thread cannot be undone, so it is confirmed. -->
+<Modal
+  bind:open={deleting}
+  title="Delete comment?"
+  description="This removes the comment and its replies for everyone. It cannot be undone."
+>
+  {#snippet footer()}
+    <button type="button" class="btn preset-outlined-surface-300-700" onclick={() => (deleting = false)}>
+      Cancel
+    </button>
+    <button type="button" class="btn preset-filled-error-500" onclick={confirmDelete}>Delete</button>
+  {/snippet}
+</Modal>
 
 <!-- Signed out, a commenter chooses how to be named before they write. -->
-<dialog bind:this={identityDialog}>
-  <article>
-    <h3>Who are you?</h3>
-    <p>Choose how to identify yourself in this comment.</p>
-    <footer class="grid">
-      <button type="button" class="secondary"
-              onclick={() => { identityDialog.close(); location.href = signInHref(); }}>
-        Sign in with GitHub
-      </button>
-      <button type="button" onclick={() => { identityDialog.close(); dialog.showModal(); }}>
-        Enter a name
-      </button>
-    </footer>
-  </article>
-</dialog>
+<Modal
+  bind:open={identifying}
+  title="Who are you?"
+  description="Choose how to identify yourself in this comment."
+>
+  {#snippet footer()}
+    <button
+      type="button"
+      class="btn preset-outlined-surface-300-700"
+      onclick={() => { identifying = false; location.href = signInHref(); }}
+    >
+      Sign in with GitHub
+    </button>
+    <button
+      type="button"
+      class="btn preset-filled-primary-500"
+      onclick={() => { identifying = false; commenting = true; }}
+    >
+      Enter a name
+    </button>
+  {/snippet}
+</Modal>
+
+<Toasts />

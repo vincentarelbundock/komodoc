@@ -133,8 +133,10 @@ deploy: seed  ## Seed the examples and serve them on this machine, no sign-in
 
 # --- the web app -----------------------------------------------------------
 #
-# Svelte, CodeMirror and Yjs, bundled into the pages the binary embeds. The
-# output goes to src/shell, so nothing under that directory is edited by hand.
+# Svelte, Skeleton, CodeMirror and Yjs, bundled into the pages the binary
+# embeds. The output goes to src/shell, so nothing under that directory is
+# edited by hand. The build refuses to run if a page has drifted from the
+# design system -- see web/scripts/check-vocabulary.js.
 
 web: $(SHELL_OUT)  ## Build the pages from web/
 

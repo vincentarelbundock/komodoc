@@ -2,6 +2,15 @@
   // The landing page: what you may publish, and what you have published.
   import Nav from "./Nav.svelte";
   import CopyLink from "./CopyLink.svelte";
+  import Icon from "./Icon.svelte";
+  import IconButton from "./IconButton.svelte";
+  import Modal from "./Modal.svelte";
+  import Hero from "./Hero.svelte";
+  import Toasts from "./Toasts.svelte";
+  import Page from "./layout/Page.svelte";
+  import Stack from "./layout/Stack.svelte";
+  import Row from "./layout/Row.svelte";
+  import { problem } from "../lib/toast.svelte.js";
   import { SHELL_HEADERS, config as loadConfig, get, me as whoami, upload } from "../lib/api.js";
   import { FAVORITES, VIEWED, read, write } from "../lib/storage.js";
 
@@ -22,9 +31,10 @@
   let busy = $state(false);
   let dragging = $state(false);
   let shared = $state(null);
-  let confirmDialog = $state(null);
+  let confirming = $state(false);
   let confirmText = $state("");
-  let sharedDialog = $state(null);
+  let sharing = $state(false);
+  let pendingDeletion = [];
   let fileInput = $state(null);
   let titleInput = $state(null);
 
@@ -124,12 +134,14 @@
     if (!slugs.length) return;
     const plural = slugs.length === 1 ? "" : "s";
     confirmText = `This permanently removes ${slugs.length} document${plural} and every comment on ${slugs.length === 1 ? "it" : "them"}. It cannot be undone.`;
-    confirmDialog.returnValue = "";
-    confirmDialog.showModal();
-    const ok = await new Promise((resolve) =>
-      confirmDialog.addEventListener("close", () => resolve(confirmDialog.returnValue === "ok"), { once: true }),
-    );
-    if (!ok) return;
+    pendingDeletion = slugs;
+    confirming = true;
+  }
+
+  async function reallyDelete() {
+    const slugs = pendingDeletion;
+    confirming = false;
+    pendingDeletion = [];
     await Promise.all(
       slugs.map((slug) =>
         fetch(`/api/documents/${slug}/delete`, { method: "POST", headers: SHELL_HEADERS }).catch(() => {}),
@@ -221,7 +233,7 @@
     const response = await upload(form);
     busy = false;
     if (!response.ok) {
-      alert((await response.json().catch(() => ({}))).error || "upload failed");
+      problem((await response.json().catch(() => ({}))).error || "upload failed");
       return;
     }
     const doc = await response.json();
@@ -229,7 +241,7 @@
     title = "";
     await showList();
     shared = new URL(doc.url, location.origin).href;
-    sharedDialog.showModal();
+    sharing = true;
   }
 
   $effect(() => {
@@ -241,151 +253,242 @@
   });
 </script>
 
+
 <svelte:window ondragover={(event) => event.preventDefault()} ondrop={drop} />
 
 <Nav {me} />
 
-<main class="container">
-  <hgroup>
-    <h1>Komodoc</h1>
-    <p>Publish a document, share its link, and collect comments on it.</p>
-  </hgroup>
+<Page width="wide">
+  <Stack gap={8}>
+    <header>
+      <Hero />
+      <p class="text-surface-600-400 text-center">
+        Publish a document, share its link, and collect comments on it.
+      </p>
+    </header>
 
-  {#if me.login && !me.can_publish}
-    <p class="refused">@{me.login} may not publish here; this deployment allows {me.publishers}.</p>
-  {/if}
-
-  {#if me.can_publish}
-    <form id="uploadForm" onsubmit={submit}>
-      {#if !chosen}
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div class="dropzone" class:dragging
-             ondragenter={(event) => { event.preventDefault(); dragging = true; }}
-             ondragover={(event) => { event.preventDefault(); dragging = true; }}
-             ondragleave={() => (dragging = false)}
-             ondrop={drop}>
-          <p>Drop a document here</p>
-          <button type="button" onclick={() => fileInput.click()}>Choose a file</button>
-          <small>{config.extensions.join(" or ")} files, up to {maxLabel}</small>
-          <input type="file" bind:this={fileInput} hidden
-                 accept={config.extensions.join(",") + ",text/html"}
-                 onchange={(event) => event.currentTarget.files[0] && choose(event.currentTarget.files[0])} />
-        </div>
-      {:else}
-        <div class="chosen">
-          <p><strong>{chosen.name}</strong></p>
-          <label for="title">Title</label>
-          <!-- Escape backs out of the choice rather than only clearing the
-               field. -->
-          <input id="title" name="title" bind:this={titleInput} bind:value={title}
-                 onkeydown={(event) => { if (event.key === "Escape") { event.preventDefault(); chosen = null; } }} />
-          <div class="grid">
-            <button type="button" class="secondary" onclick={() => (chosen = null)}>Cancel</button>
-            <button type="submit" disabled={busy}>{busy ? "Adding…" : "Add document"}</button>
-          </div>
-        </div>
-      {/if}
-      {#if fileError}<p class="fileerror">{fileError}</p>{/if}
-    </form>
-  {/if}
-
-  {#if documents.length || me.can_publish}
-    <div class="browse">
-      <div role="group">
-        <button type="button" aria-pressed={tab === "all"} onclick={() => (tab = "all")}>All</button>
-        <button type="button" aria-pressed={tab === "favorites"} onclick={() => (tab = "favorites")}>Favorites</button>
-      </div>
-      <input type="search" placeholder="Search titles" bind:value={search} />
-    </div>
-
-    {#if selected.size}
-      <div class="selection">
-        <span>{selected.size} selected</span>
-        <button type="button" onclick={deleteSelected}>Delete</button>
-      </div>
+    {#if me.login && !me.can_publish}
+      <aside class="card preset-tonal-warning p-4">
+        @{me.login} may not publish here; this deployment allows {me.publishers}.
+      </aside>
     {/if}
 
-    <table>
-      <thead>
-        <tr>
-          <th>
-            <input type="checkbox" aria-label="Select every document shown"
-                   checked={shown.length > 0 && hereSelected === shown.length}
-                   indeterminate={hereSelected > 0 && hereSelected < shown.length}
-                   onchange={(event) => tickAll(event.currentTarget.checked)} />
-          </th>
-          <th></th>
-          <th><button type="button" class="sort" class:active={sortBy === "title"} onclick={() => sortColumn("title")}>Title</button></th>
-          <th><button type="button" class="sort" class:active={sortBy === "comments"} onclick={() => sortColumn("comments")}>Comments</button></th>
-          <th><button type="button" class="sort" class:active={sortBy === "updated"} onclick={() => sortColumn("updated")}>Updated</button></th>
-          <th><button type="button" class="sort" class:active={sortBy === "viewed"} onclick={() => sortColumn("viewed")}>Opened</button></th>
-        </tr>
-      </thead>
-      <tbody>
-        {#each shown as doc (doc.slug)}
-          <tr>
-            <td>
-              <input type="checkbox" aria-label="Select {doc.title}" checked={selected.has(doc.slug)}
-                     onchange={(event) => tick(doc.slug, event.currentTarget.checked)} />
-            </td>
-            <td>
-              <button type="button" class="star" aria-pressed={favorites.has(doc.slug)}
-                      aria-label={favorites.has(doc.slug) ? "Remove from favorites" : "Add to favorites"}
-                      onclick={() => star(doc.slug)}>{favorites.has(doc.slug) ? "★" : "☆"}</button>
-            </td>
-            <td class="titlecell">
-              <a href="/docs/{doc.slug}">{doc.title}</a>
-              <!-- What the document is written in. A document that kept its
-                   source opens in the editor rather than only in the reader. -->
-              <small class="kind" title={doc.source_format
-                ? `Published from ${doc.source_format}, and editable`
-                : "HTML: published as it is, and read-only here"}>
-                {({ markdown: ".md", typst: ".typ" })[doc.source_format] || ".html"}
-              </small>
-              <CopyLink href={new URL(`/docs/${doc.slug}`, location.origin).href}
-                        label="Copy the link to {doc.title}" />
-            </td>
-            <td>{counts.has(doc.slug) ? counts.get(doc.slug) : "—"}</td>
-            <td>{doc.updated_at.slice(0, 10)}</td>
-            <td class:never={!viewed[doc.slug]}>{viewed[doc.slug] ? sinceWhen(viewed[doc.slug]) : "never"}</td>
-          </tr>
+    {#if me.can_publish}
+      <form onsubmit={submit}>
+        {#if !chosen}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="card preset-outlined-surface-300-700 flex flex-col items-center gap-3 border-dashed p-8 text-center transition-colors {dragging
+              ? 'preset-tonal-primary'
+              : ''}"
+            ondragenter={(event) => { event.preventDefault(); dragging = true; }}
+            ondragover={(event) => { event.preventDefault(); dragging = true; }}
+            ondragleave={() => (dragging = false)}
+            ondrop={drop}
+          >
+            <Icon name="upload" size={28} />
+            <p class="text-lg">Drop a document here</p>
+            <button type="button" class="btn preset-filled-primary-500" onclick={() => fileInput.click()}>
+              Choose a file
+            </button>
+            <small class="text-surface-600-400">
+              {config.extensions.join(" or ")} files, up to {maxLabel}
+            </small>
+            <input
+              type="file"
+              bind:this={fileInput}
+              hidden
+              accept={config.extensions.join(",") + ",text/html"}
+              onchange={(event) => event.currentTarget.files[0] && choose(event.currentTarget.files[0])}
+            />
+          </div>
         {:else}
-          <tr>
-            <td colspan="6" class="emptyrow">
-              {documents.length === 0
-                ? "No documents uploaded yet."
-                : tab === "favorites" && !search.trim()
-                  ? "No favorites yet. Star a document to keep it here."
-                  : "No documents match that search."}
-            </td>
-          </tr>
-        {/each}
-      </tbody>
-    </table>
-  {/if}
-</main>
+          <div class="card preset-outlined-surface-300-700 p-6">
+            <Stack gap={3}>
+              <p class="font-semibold">{chosen.name}</p>
+              <label class="label">
+                <span class="label-text">Title</span>
+                <!-- Escape backs out of the choice rather than only clearing
+                     the field. -->
+                <input
+                  class="input"
+                  bind:this={titleInput}
+                  bind:value={title}
+                  onkeydown={(event) => {
+                    if (event.key === "Escape") { event.preventDefault(); chosen = null; }
+                  }}
+                />
+              </label>
+              <Row gap={2} justify="end">
+                <button type="button" class="btn preset-outlined-surface-300-700" onclick={() => (chosen = null)}>
+                  Cancel
+                </button>
+                <button type="submit" class="btn preset-filled-primary-500" disabled={busy}>
+                  {busy ? "Adding…" : "Add document"}
+                </button>
+              </Row>
+            </Stack>
+          </div>
+        {/if}
+        {#if fileError}
+          <p class="text-error-500 mt-3 text-sm">{fileError}</p>
+        {/if}
+      </form>
+    {/if}
 
-<dialog bind:this={confirmDialog}>
-  <article>
-    <form method="dialog">
-      <h3>Delete?</h3>
-      <p>{confirmText}</p>
-      <footer class="grid">
-        <button type="submit" value="cancel" class="secondary">Cancel</button>
-        <button type="submit" value="ok" autofocus>OK</button>
-      </footer>
-    </form>
-  </article>
-</dialog>
+    {#if documents.length || me.can_publish}
+      <Stack gap={3}>
+        <Row gap={3} wrap justify="between">
+          <!-- Which documents, and which of those. The two are a filter over
+               one list rather than two lists. -->
+          <div class="btn-group preset-outlined-surface-300-700 flex-row p-1">
+            <button
+              type="button"
+              class="btn btn-sm {tab === 'all' ? 'preset-filled-primary-500' : ''}"
+              aria-pressed={tab === "all"}
+              onclick={() => (tab = "all")}
+            >
+              All
+            </button>
+            <button
+              type="button"
+              class="btn btn-sm {tab === 'favorites' ? 'preset-filled-primary-500' : ''}"
+              aria-pressed={tab === "favorites"}
+              onclick={() => (tab = "favorites")}
+            >
+              Favorites
+            </button>
+          </div>
 
-<dialog bind:this={sharedDialog}>
-  <article>
-    <h3>Published</h3>
-    <p>Share this link; anyone with it can comment, no account needed.</p>
-    <input readonly value={shared ?? ""} />
-    <footer class="grid">
-      <a role="button" class="secondary" href={shared ?? "/"}>Open</a>
-      <button type="button" onclick={() => sharedDialog.close()}>Done</button>
-    </footer>
-  </article>
-</dialog>
+          <Row gap={2}>
+            {#if selected.size}
+              <span class="text-surface-600-400 text-sm">{selected.size} selected</span>
+              <button type="button" class="btn btn-sm preset-filled-error-500" onclick={deleteSelected}>
+                Delete
+              </button>
+            {/if}
+            <input class="input w-56" type="search" placeholder="Search titles" bind:value={search} />
+          </Row>
+        </Row>
+
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th class="w-8">
+                  <input
+                    type="checkbox"
+                    class="checkbox"
+                    aria-label="Select every document shown"
+                    checked={shown.length > 0 && hereSelected === shown.length}
+                    indeterminate={hereSelected > 0 && hereSelected < shown.length}
+                    onchange={(event) => tickAll(event.currentTarget.checked)}
+                  />
+                </th>
+                <th class="w-8"></th>
+                {#each [["title", "Title"], ["comments", "Comments"], ["updated", "Updated"], ["viewed", "Opened"]] as [column, name]}
+                  <th>
+                    <button
+                      type="button"
+                      class="cursor-pointer {sortBy === column ? 'text-primary-500 font-semibold' : ''}"
+                      onclick={() => sortColumn(column)}
+                    >
+                      {name}
+                      {#if sortBy === column}{ascending ? "▲" : "▼"}{/if}
+                    </button>
+                  </th>
+                {/each}
+              </tr>
+            </thead>
+            <tbody class="[&>tr]:hover:preset-tonal-primary">
+              {#each shown as doc (doc.slug)}
+                <tr>
+                  <td>
+                    <input
+                      type="checkbox"
+                      class="checkbox"
+                      aria-label="Select {doc.title}"
+                      checked={selected.has(doc.slug)}
+                      onchange={(event) => tick(doc.slug, event.currentTarget.checked)}
+                    />
+                  </td>
+                  <td>
+                    <IconButton
+                      icon="star"
+                      tone="plain"
+                      size="btn-icon-sm"
+                      colour={favorites.has(doc.slug) ? "text-tertiary-500" : "text-surface-400-600"}
+                      pressed={favorites.has(doc.slug)}
+                      label={favorites.has(doc.slug) ? "Remove from favorites" : "Add to favorites"}
+                      onclick={() => star(doc.slug)}
+                    />
+                  </td>
+                  <td>
+                    <Row gap={2}>
+                      <a class="anchor" href="/docs/{doc.slug}">{doc.title}</a>
+                      <!-- What the document is written in. One that kept its
+                           source opens in the editor rather than only in the
+                           reader. -->
+                      <span
+                        class="badge preset-tonal-surface text-xs"
+                        title={doc.source_format
+                          ? `Published from ${doc.source_format}, and editable`
+                          : "HTML: published as it is, and read-only here"}
+                      >
+                        {({ markdown: ".md", typst: ".typ" })[doc.source_format] || ".html"}
+                      </span>
+                      <CopyLink
+                        href={new URL(`/docs/${doc.slug}`, location.origin).href}
+                        label="Copy the link to {doc.title}"
+                      />
+                    </Row>
+                  </td>
+                  <td>{counts.has(doc.slug) ? counts.get(doc.slug) : "—"}</td>
+                  <td class="whitespace-nowrap">{doc.updated_at.slice(0, 10)}</td>
+                  <td class="whitespace-nowrap {viewed[doc.slug] ? '' : 'text-surface-400-600'}">
+                    {viewed[doc.slug] ? sinceWhen(viewed[doc.slug]) : "never"}
+                  </td>
+                </tr>
+              {:else}
+                <tr>
+                  <td colspan="6" class="text-surface-600-400 h-48 text-center align-middle">
+                    {documents.length === 0
+                      ? "No documents uploaded yet."
+                      : tab === "favorites" && !search.trim()
+                        ? "No favorites yet. Star a document to keep it here."
+                        : "No documents match that search."}
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      </Stack>
+    {/if}
+  </Stack>
+</Page>
+
+<Modal bind:open={confirming} title="Delete?" description={confirmText}>
+  {#snippet footer()}
+    <button type="button" class="btn preset-outlined-surface-300-700" onclick={() => (confirming = false)}>
+      Cancel
+    </button>
+    <button type="button" class="btn preset-filled-error-500" onclick={reallyDelete}>Delete</button>
+  {/snippet}
+</Modal>
+
+<Modal
+  bind:open={sharing}
+  title="Published"
+  description="Share this link; anyone with it can comment, no account needed."
+>
+  {#snippet children()}
+    <input class="input" readonly value={shared ?? ""} />
+  {/snippet}
+  {#snippet footer()}
+    <a role="button" class="btn preset-outlined-surface-300-700" href={shared ?? "/"}>Open</a>
+    <button type="button" class="btn preset-filled-primary-500" onclick={() => (sharing = false)}>Done</button>
+  {/snippet}
+</Modal>
+
+<Toasts />

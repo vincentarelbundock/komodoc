@@ -9,14 +9,8 @@
   // icons from two different sets.
   const ICONS = {
     book: [["path", "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"]],
-    "panel-left": [
-      ["rect", { width: 18, height: 18, x: 3, y: 3, rx: 2 }],
-      ["path", "M9 3v18"],
-    ],
-    "panel-right": [
-      ["rect", { width: 18, height: 18, x: 3, y: 3, rx: 2 }],
-      ["path", "M15 3v18"],
-    ],
+    "panel-left": [["rect", { width: 18, height: 18, x: 3, y: 3, rx: 2 }], ["path", "M9 3v18"]],
+    "panel-right": [["rect", { width: 18, height: 18, x: 3, y: 3, rx: 2 }], ["path", "M15 3v18"]],
     "file-text": [
       ["path", "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"],
       ["path", "M14 2v4a2 2 0 0 0 2 2h4"],
@@ -24,10 +18,7 @@
       ["path", "M16 13H8"],
       ["path", "M16 17H8"],
     ],
-    lock: [
-      ["rect", { width: 18, height: 11, x: 3, y: 11, rx: 2, ry: 2 }],
-      ["path", "M7 11V7a5 5 0 0 1 10 0v4"],
-    ],
+    lock: [["rect", { width: 18, height: 11, x: 3, y: 11, rx: 2, ry: 2 }], ["path", "M7 11V7a5 5 0 0 1 10 0v4"]],
     save: [
       ["path", "M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"],
       ["path", "M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"],
@@ -49,27 +40,28 @@
       ["path", "m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"],
     ],
     box: [
-      ["path", "M5 3a2 2 0 0 0-2 2"],
-      ["path", "M19 3a2 2 0 0 1 2 2"],
-      ["path", "M5 21a2 2 0 0 1-2-2"],
-      ["path", "M9 3h1"],
-      ["path", "M9 21h2"],
-      ["path", "M14 3h1"],
-      ["path", "M3 9v1"],
-      ["path", "M21 9v2"],
-      ["path", "M3 14v1"],
+      ["path", "M5 3a2 2 0 0 0-2 2"], ["path", "M19 3a2 2 0 0 1 2 2"], ["path", "M5 21a2 2 0 0 1-2-2"],
+      ["path", "M9 3h1"], ["path", "M9 21h2"], ["path", "M14 3h1"],
+      ["path", "M3 9v1"], ["path", "M21 9v2"], ["path", "M3 14v1"],
       ["path", "m21 15-3 3-2-2-3 3v-8z"],
+    ],
+    star: [["path", "M11.5 2.5a.6.6 0 0 1 1 0l2.5 5.1 5.6.8a.6.6 0 0 1 .3 1l-4 4 1 5.6a.6.6 0 0 1-.9.6L12 17l-5 2.6a.6.6 0 0 1-.9-.6l1-5.6-4-4a.6.6 0 0 1 .3-1l5.6-.8z"]],
+    upload: [
+      ["path", "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"],
+      ["path", "m17 8-5-5-5 5"],
+      ["path", "M12 3v12"],
+    ],
+    search: [["circle", { cx: 11, cy: 11, r: 8 }], ["path", "m21 21-4.3-4.3"]],
+    trash: [
+      ["path", "M3 6h18"],
+      ["path", "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"],
+      ["path", "M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"],
     ],
   };
 
-  // One size unless a caller has a reason: the bar, the tool row and the
-  // sidebar all want the same glyph at the same weight, and an icon that is
-  // sized by whatever ancestor it happens to sit under is how they stop
-  // matching.
-  // An exact number of pixels rather than a fraction of one: these are drawn
-  // on a 24-unit grid with a 2-unit stroke, and a size that lands between
-  // pixels is what makes one icon look heavier than the one beside it.
-  let { name, size = 17 } = $props();
+  // Skeleton's button sizes the icon inside it, so the default here is only
+  // for an icon that stands on its own.
+  let { name, size = null } = $props();
 </script>
 
 <svg
@@ -86,6 +78,8 @@
   {#each ICONS[name] ?? [] as [shape, geometry]}
     {#if shape === "rect"}
       <rect {...geometry} />
+    {:else if shape === "circle"}
+      <circle {...geometry} />
     {:else}
       <path d={geometry} />
     {/if}

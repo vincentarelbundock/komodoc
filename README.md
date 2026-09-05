@@ -435,7 +435,7 @@ Three builds go into one binary.
 | | What it is | Built by |
 | --- | --- | --- |
 | `engine/` | markdown and typst, rendered | cargo, natively and to WebAssembly |
-| `web/` | the pages: Svelte, CodeMirror 6, Yjs | bun and vite |
+| `web/` | the pages: Svelte, Skeleton, CodeMirror 6, Yjs | bun and vite |
 | `komodoc/` | the server and the command line | cargo |
 
 The engine is built twice — natively into the binary, and to WebAssembly for
@@ -456,6 +456,28 @@ make test     # rustfmt, clippy and the test suite
 separate: it takes a few minutes and adds thirty megabytes to the binary, and a
 build without it works exactly as described above, minus typst editing.
 
+### The look
+
+The pages are [Skeleton](https://skeleton.dev) on Tailwind 4. Skeleton supplies
+the furniture -- buttons, cards, inputs, tables, dialogs, tooltips, toasts --
+and `web/src/styles/theme.css` colours all of it from Komodoc's own four
+colours, so the palette is written down once and nowhere else.
+
+Three rules keep a growing application looking like one application, and
+`make test` enforces them:
+
+1. A colour or a size comes from the theme. A hex value or an arbitrary
+   Tailwind size in a component is a decision made twice.
+2. A control is a component. There is one `IconButton`, so there cannot be a
+   fourth kind of button that is almost like the other three.
+3. Layout comes from `Page`, `Stack` and `Row`, so a new screen is assembled
+   rather than measured.
+
+Two things sit outside that system deliberately: the agent, which paints
+highlights inside a document on another origin where none of this stylesheet
+reaches it, and the colours identifying people in a shared editing session,
+which travel over the wire to other browsers.
+
 ### The editor
 
 The source is edited in CodeMirror 6, bound to a Yjs document. Two people
@@ -464,5 +486,5 @@ keeps their own undo history, and each sees the other's caret where it actually
 is, labelled with their name. The server relays those updates and never reads
 them.
 
-The pages are Svelte. A reader who only reads fetches about 40 KB; CodeMirror
-and Yjs are another bundle, fetched only when an editor is actually opened.
+A reader who only reads fetches the page and its bundle; CodeMirror and Yjs are
+a separate bundle, fetched only when an editor is actually opened.

@@ -1,6 +1,7 @@
 <script>
-  import Icon from "./Icon.svelte";
+  import IconButton from "./IconButton.svelte";
   import CommentCard from "./CommentCard.svelte";
+  import Row from "./layout/Row.svelte";
 
   // The annotations, in document order: an annotation is about a place in the
   // text, so the column follows the page rather than the order things were
@@ -65,46 +66,55 @@
        pane scrolls. Box draws on a figure, so a document with no figures has
        nothing for it to do; saying so is better than a button that silently
        does nothing. -->
-  <div class="tools" role="radiogroup" aria-label="Annotation tool">
-    {#each TOOLS as item}
-      <button
-        type="button"
-        class="tool"
-        class:outline={tool !== item.id}
-        aria-pressed={tool === item.id}
-        aria-label={item.label}
-        disabled={item.id === "region" && !hasFigures}
-        title={item.id === "region" && !hasFigures
-          ? "This document has no figures to draw on"
-          : item.title}
-        onclick={() => ontool?.(item.id)}
-      >
-        <Icon name={item.icon} />
-        <span>{item.label}</span>
-      </button>
-    {/each}
+  <div class="bg-surface-50-950 sticky top-0 z-1 py-3">
+    <div class="tools flex gap-1" role="radiogroup" aria-label="Annotation tool">
+      {#each TOOLS as item}
+        <IconButton
+          icon={item.icon}
+          label={item.label}
+          tool={item.id}
+          pressed={tool === item.id}
+          disabled={item.id === "region" && !hasFigures}
+          title={item.id === "region" && !hasFigures
+            ? "This document has no figures to draw on"
+            : item.title}
+          onclick={() => ontool?.(item.id)}
+        />
+      {/each}
+    </div>
   </div>
 
-  <hgroup>
-    <h3>Comments <small>{comments.length ? `${open} open · ${comments.length} total` : ""}</small></h3>
+  <header class="mb-3">
+    <Row justify="between">
+      <h3 class="h5">Comments</h3>
+      {#if comments.length}
+        <small class="text-surface-600-400">{open} open · {comments.length} total</small>
+      {/if}
+    </Row>
     <!-- Onboarding, not a caption: it goes once there is something in the
          column to read. -->
     {#if comments.length === 0}
-      <p>Highlight text in the document, then choose “Comment”.</p>
+      <p class="text-surface-600-400 text-sm">
+        Highlight text in the document, then choose “Comment”.
+      </p>
     {/if}
-  </hgroup>
+  </header>
 
   {#if allTags.length}
-    <div class="tagfilter">
+    <div class="mb-3 flex flex-wrap gap-1">
       {#each allTags as tag}
-        <button type="button" class="tag" class:chosen={chosen.has(tag)} onclick={() => toggleTag(tag)}>
+        <button
+          type="button"
+          class="chip {chosen.has(tag) ? 'preset-filled-primary-500' : 'preset-outlined-surface-300-700'}"
+          onclick={() => toggleTag(tag)}
+        >
           {tag}
         </button>
       {/each}
     </div>
   {/if}
 
-  <div id="comments">
+  <div id="comments" class="flex flex-col gap-3">
     {#each shown as comment (comment)}
       <CommentCard
         {comment}
