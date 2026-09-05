@@ -380,3 +380,37 @@ work yet; packages are not resolved anywhere; `yrs` is not in the server, so
 the room still relays Yjs updates it cannot read and a session still ends when
 the last editor leaves; fonts are still shipped whole. The browser track
 (CodeMirror, Bun, TypeScript) is untouched.
+
+## The web app, rebuilt
+
+The browser track this spec listed as "not built" is built: Svelte 5,
+CodeMirror 6, Yjs and Vite, installed by bun, with the sources in `web/` and
+the build output in `src/shell` where the binary embeds it.
+
+What changed against the plan above:
+
+**The editor is bound to the shared document rather than mirrored onto it.**
+The plan said "CodeMirror 6 replaces the `<textarea>`, with `y-codemirror.next`
+for the Yjs binding", which is what happened -- but the consequence is larger
+than a swap. The old binding diffed a textarea's value on every keystroke to
+work out what had changed; the new one *is* the Yjs text, so each person keeps
+their own undo history and each sees the others' carets. Awareness needed one
+message the server did not have, `y-awareness`, relayed to the rest of the
+session and never stored.
+
+**Everything is a build output.** `src/shell` used to be sources with two
+generated files in it; it is now generated whole, and gitignored. That moved
+`__CONFIG__` out of the pages -- the upload page asks `/api/config` for the
+limits it enforces -- and turned the server's route table into a walk of the
+build, because a bundler decides the names of the files it writes.
+
+**Typst got a small CodeMirror mode.** There is no maintained one, and the
+alternative is typst's own parser as a second WebAssembly module. Thirty
+megabytes to colour a heading is not a trade worth making while the compiler
+module is already downloading.
+
+Still not built, unchanged from the list above: the engine's file map is a
+directory reader rather than a host-supplied map, so browser-side `#import`
+and `#bibliography` do not work yet; packages are resolved nowhere; `yrs` is
+not in the server, so a session still ends when the last editor leaves; fonts
+still ship whole.
