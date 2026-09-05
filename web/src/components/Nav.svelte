@@ -1,6 +1,6 @@
 <script>
   import Logo from "./Logo.svelte";
-  import Icon from "./Icon.svelte";
+  import IconButton from "./IconButton.svelte";
   import Row from "./layout/Row.svelte";
   import { signInHref, signOut } from "../lib/api.js";
 
@@ -13,7 +13,7 @@
   let { me = {}, children, tools } = $props();
 </script>
 
-<nav class="flex items-center gap-4">
+<nav class="flex items-center justify-between gap-4">
   <Row gap={3}>
     <a class="flex items-center gap-2" href="/" aria-label="Komodoc home">
       <Logo />
@@ -22,20 +22,13 @@
     {@render children?.()}
   </Row>
 
-  <!-- The one link that is the same on every page: what Komodoc is and how to
-       use it, from the project's own README. -->
-  <a
-    href="/documentation"
-    class="text-surface-600-400 hover:text-primary-500 mx-auto flex items-center gap-2 text-sm"
-    aria-label="Documentation"
-    title="Documentation"
-  >
-    <Icon name="book" size={17} />
-    <span class="navlabel">Documentation</span>
-  </a>
-
   <Row gap={3}>
     {@render tools?.()}
+    <!-- The one link that is the same on every page: what Komodoc is and how
+         to use it, from the project's own README. An icon among the other
+         icons rather than a phrase in the middle of the bar, which is width
+         the document title wanted and a shape nothing else in the bar had. -->
+    <IconButton icon="help" label="Documentation" href="/documentation" />
     {#if me.login}
       <small class="text-surface-600-400 whitespace-nowrap">@{me.login}</small>
       <button type="button" class="btn btn-sm preset-outlined-surface-300-700" onclick={signOut}>

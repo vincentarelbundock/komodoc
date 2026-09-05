@@ -123,10 +123,13 @@
 	--typo-anchor--text-decoration-line: none;
 	--typo-anchor--hover--text-decoration-line: underline;
 
-	/* The page itself: the lightest surface, so a document in the frame -- which
-	   is white and carries its own styles -- sits on something a shade quieter
-	   rather than on more of itself. */
-	--color-root-bg-light: var(--color-surface-50);
+	/* What the shell is painted on. White, rather than the palest step of the
+	   surface ramp: a bar, an editor and a column of comments are all paper,
+	   and the ramp is for the lines drawn on paper and the ink written on it.
+	   A grey ground made every one of them look like a disabled control. */
+	--color-shell: light-dark(#ffffff, var(--color-surface-950));
+
+	--color-root-bg-light: #ffffff;
 	--color-root-bg-dark: var(--color-surface-950);
 
 	/* The height of the bar, which the reader sizes its panes against: the

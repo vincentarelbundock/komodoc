@@ -16,7 +16,7 @@
    text; the bar is ours because its height is what the reader measures
    against. */
 body {
-  background: var(--color-surface-50-950);
+  background: var(--color-shell);
 }
 body > nav {
   position: sticky;
@@ -25,7 +25,7 @@ body > nav {
   height: var(--komodoc-bar);
   padding-inline: --spacing(4);
   border-bottom: 1px solid var(--color-surface-200-800);
-  background: color-mix(in srgb, var(--color-surface-50-950) 94%, transparent);
+  background: color-mix(in srgb, var(--color-shell) 94%, transparent);
   backdrop-filter: blur(12px);
 }
 
@@ -61,7 +61,7 @@ main.reader {
 .viewport {
   flex: 1 1 auto;
   min-width: 0;
-  background: var(--color-surface-50-950);
+  background: var(--color-shell);
 }
 .viewport iframe {
   /* The document takes whatever the grip leaves it: the reader sets the split,
@@ -70,7 +70,12 @@ main.reader {
   width: 100%;
   height: 100%;
   border: 0;
-  background: var(--color-surface-50-950);
+  background: var(--color-shell);
+}
+/* The tools stay in view while the comments scroll under them, so they need a
+   ground of their own -- the shell's, not a shade of it. */
+.toolrow {
+  background: var(--color-shell);
 }
 .sidebar {
   flex: 0 0 var(--komodoc-sidebar);
@@ -150,7 +155,7 @@ main.reader.source-right .sidebar {
 .cm-editor {
   height: 100%;
   min-height: 0;
-  background: var(--color-surface-50-950);
+  background: var(--color-shell);
   color: var(--color-surface-950-50);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
@@ -174,7 +179,7 @@ main.reader.source-right .sidebar {
 }
 /* Line numbers are furniture: present, and quieter than the text. */
 .cm-editor .cm-gutters {
-  background: var(--color-surface-50-950);
+  background: var(--color-shell);
   border-right: 1px solid var(--color-surface-200-800);
   color: var(--color-surface-400-600);
 }
@@ -369,12 +374,6 @@ main.reader.source-right .sidebar {
 /* ------------------------------------------------------------- the phone */
 
 @media (max-width: 760px) {
-  /* The icon says the same thing in a fifth of the width, and the word is what
-     the document title needs back. The link keeps its name for a screen reader
-     either way. */
-  .navlabel {
-    display: none;
-  }
   /* One column, so there is nothing to drag. */
   main.reader {
     display: block;

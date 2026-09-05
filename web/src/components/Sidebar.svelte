@@ -66,7 +66,7 @@
        pane scrolls. Box draws on a figure, so a document with no figures has
        nothing for it to do; saying so is better than a button that silently
        does nothing. -->
-  <div class="bg-surface-50-950 sticky top-0 z-1 py-3">
+  <div class="toolrow sticky top-0 z-1 py-3">
     <div class="tools flex gap-1" role="radiogroup" aria-label="Annotation tool">
       {#each TOOLS as item}
         <IconButton
