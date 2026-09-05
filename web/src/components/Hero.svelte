@@ -5,6 +5,6 @@
 </script>
 
 <div class="hero mb-2 flex items-center justify-center gap-3">
-  <Logo />
+  <Logo size="hero" />
   <span class="wordmark"><span class="wordmark-komo">komo</span><span class="wordmark-doc">doc</span></span>
 </div>

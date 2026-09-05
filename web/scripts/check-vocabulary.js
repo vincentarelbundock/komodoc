@@ -75,6 +75,29 @@ for (const path of files(SRC)) {
   });
 }
 
+// 4. A global class of ours must not be a name Skeleton has taken. Its
+//    utilities are plain class names -- `card`, `chip`, `mark` -- and a
+//    stylesheet of ours using one of them means both rules apply to the same
+//    element. That is how the komodo ended up drawn on a sage highlight: our
+//    logo wore a class called `mark`, and so does Skeleton's marker pen.
+const skeleton = new Set();
+for (const path of files(join(ROOT, "node_modules/@skeletonlabs/skeleton/src"))) {
+  if (!path.endsWith(".css")) continue;
+  for (const found of readFileSync(path, "utf8").matchAll(/@utility\s+([\w-]+)/g)) skeleton.add(found[1]);
+}
+for (const path of files(join(SRC, "styles"))) {
+  if (!path.endsWith(".css")) continue;
+  const name = relative(ROOT, path);
+  const source = readFileSync(path, "utf8");
+  source.split("\n").forEach((line, index) => {
+    for (const found of line.matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+      if (skeleton.has(found[1])) {
+        complain(name, index + 1, `.${found[1]} is also a Skeleton utility; rename it or scope it to its component`, line);
+      }
+    }
+  });
+}
+
 if (problems.length) {
   console.error(`The pages are drifting from the design system:\n\n${problems.join("\n\n")}\n`);
   process.exit(1);

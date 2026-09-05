@@ -258,21 +258,8 @@ main.reader.no-preview .viewport {
 
 /* ------------------------------------------------------------------- brand */
 
-/* The komodo, sized by height so its own proportions decide the width. */
-.mark {
-  display: block;
-  height: 1.6rem;
-  width: auto;
-  aspect-ratio: 971 / 759;
-}
-/* The komodo is the brand colour; the page it is holding stays ink, so the
-   mark says the same thing the wordmark does. */
-.logo-head {
-  fill: var(--color-primary-500);
-}
-.logo-page {
-  fill: var(--color-surface-800-200);
-}
+/* The komodo draws itself; see Logo.svelte. What is left here is the word
+   beside it, which the pages set at two sizes. */
 .wordmark {
   font-family: "IBM Plex Sans", var(--typo-base--font-family);
   font-weight: 600;
@@ -286,9 +273,6 @@ main.reader.no-preview .viewport {
   color: var(--color-surface-800-200);
 }
 /* The same pair again, larger and centred, at the top of a page that shows it. */
-.hero .mark {
-  height: 3.2rem;
-}
 .hero .wordmark {
   font-size: var(--text-3xl);
 }
