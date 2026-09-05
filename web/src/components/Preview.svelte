@@ -7,7 +7,7 @@
   //
   // Everything arriving from the frame is untrusted. The agent shares an
   // origin with the document, and a hostile document can rewrite it.
-  let { src, docsOrigin, onmessage, grabbing = false } = $props();
+  let { src, docsOrigin, onmessage, grabbing = false, away = false } = $props();
 
   let frame = $state(null);
 
@@ -26,7 +26,7 @@
 
 <svelte:window onmessage={receive} />
 
-<section class="viewport">
+<section class="viewport" class:away>
   <!-- allow-same-origin refers to the document's own origin, not this one, so
        the agent can read the document while the document can read nothing
        here. While a separator is being dragged the frame is deafened: it

@@ -7,10 +7,12 @@
   import * as collab from "../lib/collab.js";
   import { openRoom } from "../lib/room.js";
   import { getPrivate, me as whoami, postRaw, signInHref } from "../lib/api.js";
-  import { AUTHOR, LINKED, markViewed, read, write } from "../lib/storage.js";
-  import { PANES, clamp, rememberWidth, storedWidth } from "../lib/panes.js";
+  import { AUTHOR, LAYOUT, LINKED, SOURCE_SIDE, markViewed, read, write } from "../lib/storage.js";
+  import { LAYOUTS, PANES, RATIOS, clamp, pixels, remember, showing, stored } from "../lib/panes.js";
 
+  import { Menu } from "@skeletonlabs/skeleton-svelte";
   import Nav from "./Nav.svelte";
+  import Icon from "./Icon.svelte";
   import IconButton from "./IconButton.svelte";
   import ControlGroup from "./ControlGroup.svelte";
   import CopyLink from "./CopyLink.svelte";
@@ -570,31 +572,70 @@
 
   /* ------------------------------------------------------------------ panes */
 
-  let showing = $state({ source: false, preview: true, comments: true });
-  let widths = $state({ [PANES.editor.key]: storedWidth(PANES.editor), [PANES.sidebar.key]: storedWidth(PANES.sidebar) });
-  let guide = $state({ shown: false, left: 0 });
+  // How the window is divided, and which side the source is on. Both are one
+  // reader's habit rather than anything about a document, so both are
+  // remembered and an editor reopened lands where they left it.
+  let layout = $state(LAYOUTS.includes(read(LAYOUT, "split")) ? read(LAYOUT, "split") : "split");
+  let sourceSide = $state(read(SOURCE_SIDE, "left") === "right" ? "right" : "left");
+  let commentsOpen = $state(true);
+  // The source and the document are kept as a share of what they have between
+  // them; the comment column is kept in pixels. Two units because they are two
+  // different kinds of pane: half a window stays half when the window changes,
+  // and a comment card wants the same readable width whatever the screen is.
+  let sizes = $state({
+    [PANES.editor.key]: stored(PANES.editor),
+    [PANES.sidebar.key]: stored(PANES.sidebar),
+  });
+  let guide = $state({ shown: false, left: 0, held: false });
   let grabbing = $state(false);
 
-  const separators = () => (showing.source ? 8 : 0) + (showing.comments ? 8 : 0);
+  // What every measurement below is made against.
+  const panes = $derived({ layout, comments: commentsOpen, editing, sourceSide, sizes });
+  const shown = $derived(showing(panes));
 
+  // Every size is kept within what the window can currently give it, which
+  // changes when the window does and when a pane opens or closes.
   function fit() {
-    for (const pane of Object.values(PANES)) {
-      widths[pane.key] = clamp(pane, widths[pane.key], { widths, showing, separators: separators() });
-    }
+    for (const pane of Object.values(PANES)) sizes[pane.key] = clamp(pane, panes);
   }
 
-  function setWidth(pane, width, step) {
-    const wanted = width === null ? widths[pane.key] + step : width;
-    widths[pane.key] = clamp(pane, wanted, { widths, showing, separators: separators() });
-    rememberWidth(pane, widths[pane.key]);
+  function setSize(pane, size) {
+    sizes[pane.key] = clamp(pane, panes, size);
+    remember(pane, sizes[pane.key]);
   }
 
-  // Hiding the last pane would leave the window empty, which is never what was
-  // meant: the button refuses, and stays pressed.
-  function togglePane(which) {
-    const on = showing[which];
-    if (on && Object.values(showing).filter(Boolean).length === 1) return;
-    showing[which] = !on;
+  // The three arrangements, in the order the button walks through them. The
+  // icon is the one it is in rather than the one it is going to: the button is
+  // as much a statement of where you are as a way of leaving.
+  const ARRANGEMENTS = {
+    split: { icon: "columns-2", says: "Source and document", next: "source" },
+    source: { icon: "panel-left", says: "Source only", next: "document" },
+    document: { icon: "file-text", says: "Document only", next: "split" },
+  };
+
+  function cycleLayout() {
+    layout = ARRANGEMENTS[layout].next;
+    write(LAYOUT, layout);
+    fit();
+  }
+
+  function putSourceOn(side) {
+    sourceSide = side;
+    write(SOURCE_SIDE, side);
+    fit();
+  }
+
+  // Everything the layout menu offers, named by what was chosen. The menu
+  // reports the value of the line rather than each line calling back, so this
+  // is the one place those names are read.
+  function chose(what) {
+    if (what === "side-left" || what === "side-right") return putSourceOn(what.slice(5));
+    if (what.startsWith("ratio-")) return setSize(PANES.editor, Number(what.slice(6)));
+    if (what === "linked") return setLinked(!linked);
+  }
+
+  function toggleComments() {
+    commentsOpen = !commentsOpen;
     fit();
   }
 
@@ -614,7 +655,6 @@
     });
     session.text.observe(sourceChanged);
     room.send({ type: "y-open" });
-    showing.source = true;
     fit();
     paintPreview();
   }
@@ -683,9 +723,23 @@
   function beforeUnload(event) {
     if (dirty) event.preventDefault();
   }
+
+  // The arrangement is changed often enough to be worth a key. Ctrl-\ is what
+  // an editor usually puts a split on, and nothing here or in CodeMirror wants
+  // it.
+  function shortcut(event) {
+    if (editing && (event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === "l") {
+      event.preventDefault();
+      setLinked(!linked);
+      return;
+    }
+    if (!editing || !(event.ctrlKey || event.metaKey) || event.key !== "\\") return;
+    event.preventDefault();
+    cycleLayout();
+  }
 </script>
 
-<svelte:window onresize={fit} onbeforeunload={beforeUnload} onpagehide={() => session?.leave()} />
+<svelte:window onresize={fit} onkeydown={shortcut} onbeforeunload={beforeUnload} onpagehide={() => session?.leave()} />
 
 <Nav {me}>
   {#snippet children()}
@@ -699,25 +753,65 @@
 
   {#snippet tools()}
     <Row gap={3}>
-      <!-- Which panes are showing. A group of its own, separate from the
-           annotation tools: these change what you are looking at, not what a
-           selection would become. -->
-      <ControlGroup label="Panes">
+      <!-- What you are looking at. Two controls rather than three switches:
+           one arrangement of the source and the document, which only means
+           anything while editing, and the comments, which are a column that is
+           either there or not. -->
+      <ControlGroup label="Layout">
         {#snippet children()}
           {#if editing}
-            <IconButton icon="panel-left" label="Show or hide the source" title="Source"
-                        pressed={showing.source} onclick={() => togglePane("source")} />
+            <!-- Right-click, or hold, for which side the source is on: an
+                 order set once does not belong in a control flipped hourly. -->
+            <Menu onSelect={(chosen) => chose(chosen.value)}>
+              <Menu.ContextTrigger>
+                {#snippet element(attributes)}
+                  <span {...attributes} class="contents">
+                    <IconButton
+                      icon={ARRANGEMENTS[layout].icon}
+                      label="Layout: {ARRANGEMENTS[layout].says}. Click for {ARRANGEMENTS[
+                        ARRANGEMENTS[layout].next
+                      ].says}."
+                      pressed={layout !== "split"}
+                      onclick={cycleLayout}
+                    />
+                  </span>
+                {/snippet}
+              </Menu.ContextTrigger>
+              <Menu.Positioner class="z-50">
+                <Menu.Content class="card bg-surface-50-950 w-52 p-1 shadow-xl">
+                  {#each [["left", "Source on left"], ["right", "Source on right"]] as [side, says]}
+                    <Menu.Item value="side-{side}" class="menuitem">
+                      <span class="w-4">{sourceSide === side ? "✓" : ""}</span>
+                      {says}
+                    </Menu.Item>
+                  {/each}
+                  <hr class="hr my-1" />
+                  <!-- The same ratios a drag sticks to, for anyone who never
+                       finds that it does. -->
+                  {#each RATIOS as ratio}
+                    <Menu.Item value="ratio-{ratio.share}" class="menuitem">
+                      <span class="w-4">{sizes[PANES.editor.key] === ratio.share ? "✓" : ""}</span>
+                      {ratio.says}
+                    </Menu.Item>
+                  {/each}
+                  <hr class="hr my-1" />
+                  <!-- A preference rather than a mode: set once, and only about
+                       this arrangement. It does not earn a place in the bar. -->
+                  <Menu.Item value="linked" class="menuitem">
+                    <span class="w-4">{linked ? "✓" : ""}</span>
+                    Keep in step
+                  </Menu.Item>
+                </Menu.Content>
+              </Menu.Positioner>
+            </Menu>
           {/if}
-          <IconButton icon="file-text" label="Show or hide the document" title="Document"
-                      pressed={showing.preview} onclick={() => togglePane("preview")} />
-          <IconButton icon="panel-right" label="Show or hide the comments" title="Comments"
-                      pressed={showing.comments} onclick={() => togglePane("comments")} />
-          {#if editing}
-            <!-- Locked, a click in either the source or the document takes the
-                 other one to the same place. -->
-            <IconButton icon="lock" label="Keep the source and the document in step"
-                        title="Keep in step" pressed={linked} onclick={() => setLinked(!linked)} />
-          {/if}
+          <IconButton
+            icon="message-square"
+            label="Show or hide the comments"
+            title="Comments"
+            pressed={commentsOpen}
+            onclick={toggleComments}
+          />
         {/snippet}
       </ControlGroup>
       {#if editing}
@@ -738,28 +832,39 @@
   {/snippet}
 </Nav>
 
-<main class="reader" class:editing={showing.source} class:no-preview={!showing.preview}
-      class:no-comments={!showing.comments}
-      style="--komodoc-editor: {widths[PANES.editor.key]}px; --komodoc-sidebar: {widths[PANES.sidebar.key]}px">
-  {#if showing.source}
+<main class="reader" class:editing={shown.source} class:no-preview={!shown.document}
+      class:no-comments={!shown.comments} class:source-right={sourceSide === "right"}
+      style="--komodoc-editor: {pixels(PANES.editor, panes)}px; --komodoc-sidebar: {pixels(PANES.sidebar, panes)}px">
+  {#if shown.source}
     <section class="editorpane">
       {#if Editor}
         <Editor bind:this={editor} {session} format={sourceFormat}
                 onchange={sourceChanged} oncaret={followCaret} onsave={save} />
       {/if}
     </section>
-    <Grip pane={PANES.editor} label="Resize the editor pane"
-          onwidth={(width, step) => setWidth(PANES.editor, width ?? null, step)}
-          onguide={(width) => (guide = { shown: true, left: PANES.editor.edgeAt(clamp(PANES.editor, width, { widths, showing, separators: separators() })) })}
-          ongrab={(on) => { grabbing = on; guide = { ...guide, shown: on }; }} />
   {/if}
 
-  <Preview bind:this={preview} src={frameSrc} {docsOrigin} onmessage={fromFrame} {grabbing} />
+  <!-- A separator only where there are two things to separate. -->
+  {#if shown.source && shown.document}
+    <Grip pane={PANES.editor} label="Split between the source and the document" panes={panes}
+          onsize={(size) => setSize(PANES.editor, size)}
+          onguide={(where) => (guide = where)}
+          ongrab={(on) => { grabbing = on; guide = { ...guide, shown: on }; }}>
+      {#snippet aside()}
+        {#if !linked}<Icon name="unlock" />{/if}
+      {/snippet}
+    </Grip>
+  {/if}
 
-  {#if showing.comments}
-    <Grip pane={PANES.sidebar} label="Resize the comment pane"
-          onwidth={(width, step) => setWidth(PANES.sidebar, width ?? null, step)}
-          onguide={(width) => (guide = { shown: true, left: PANES.sidebar.edgeAt(clamp(PANES.sidebar, width, { widths, showing, separators: separators() })) })}
+  <!-- Kept mounted whatever the arrangement: taking the frame out of the tree
+       would reload the document and lose the reader's place in it. -->
+  <Preview bind:this={preview} src={frameSrc} {docsOrigin} onmessage={fromFrame} {grabbing}
+           away={!shown.document} />
+
+  {#if shown.comments}
+    <Grip pane={PANES.sidebar} label="Resize the comment pane" panes={panes}
+          onsize={(size) => setSize(PANES.sidebar, size)}
+          onguide={(where) => (guide = where)}
           ongrab={(on) => { grabbing = on; guide = { ...guide, shown: on }; }} />
     <Sidebar {comments} {figureAt} {identity} {canModerate} {tool}
              hasFigures={figureAt.length > 0}
@@ -771,7 +876,7 @@
   <!-- Shown only while a separator is dragged: a line that follows the pointer
        so the split can be seen moving without the iframe reflowing on every
        pointermove. -->
-  {#if guide.shown}<div class="grip-guide" style="left: {guide.left}px"></div>{/if}
+  {#if guide.shown}<div class="grip-guide" class:held={guide.held} style="left: {guide.left}px"></div>{/if}
 </main>
 
 {#if bar.shown}

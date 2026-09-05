@@ -27,6 +27,11 @@ export const VIEWED = "komodoc-viewed";
 export const FAVORITES = "komodoc-favorites";
 export const AUTHOR = "komodoc-author";
 export const LINKED = "komodoc-linked";
+// How the window was last divided, and which side the source was on. Both are
+// one reader's habit rather than anything about a document, so reopening an
+// editor lands where they left it.
+export const LAYOUT = "komodoc-layout";
+export const SOURCE_SIDE = "komodoc-source-side";
 
 /// Notes that this document was opened just now, which is what the landing
 /// page sorts by.

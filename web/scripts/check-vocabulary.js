@@ -98,6 +98,26 @@ for (const path of files(join(SRC, "styles"))) {
   });
 }
 
+// 5. A prop must not be named after a rune. Svelte reads `$state` in a
+//    component that has a prop called `state` as the store `state`, compiles
+//    it to a subscription, and the component throws "subscribe is not a
+//    function" on mount -- with no warning at build time and a blank page at
+//    run time. The same is true of every other rune.
+const RUNES = ["state", "derived", "props", "effect", "bindable", "inspect", "host"];
+for (const path of files(SRC)) {
+  const name = relative(ROOT, path);
+  if (!name.endsWith(".svelte")) continue;
+  const source = readFileSync(path, "utf8");
+  const declaration = source.match(/let\s*\{([^}]*)\}\s*=\s*\$props\(\)/);
+  if (!declaration) continue;
+  const named = declaration[1].split(",").map((each) => each.split(/[:=]/)[0].trim());
+  for (const rune of RUNES) {
+    if (!named.includes(rune)) continue;
+    const at = source.slice(0, declaration.index).split("\n").length;
+    complain(name, at, `a prop called \`${rune}\` shadows the \`$${rune}\` rune; rename it`, declaration[0]);
+  }
+}
+
 if (problems.length) {
   console.error(`The pages are drifting from the design system:\n\n${problems.join("\n\n")}\n`);
   process.exit(1);

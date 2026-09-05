@@ -84,8 +84,29 @@ main.reader.no-preview .editorpane,
 main.reader.no-preview:not(.editing) .sidebar {
   flex: 1 1 auto;
 }
-main.reader.no-preview .viewport {
+.viewport.away {
   display: none;
+}
+
+/* Which side the source is on is an order, not a different tree: moving the
+   frame between parents would reload the document and lose the reader's place
+   in it. The comments stay last whichever way round the other two are. */
+main.reader.source-right .viewport {
+  order: 1;
+}
+main.reader.source-right .grip-editor {
+  order: 2;
+}
+main.reader.source-right .editorpane {
+  order: 3;
+  border-right: 0;
+  border-left: 1px solid var(--color-surface-200-800);
+}
+main.reader.source-right .grip-sidebar {
+  order: 4;
+}
+main.reader.source-right .sidebar {
+  order: 5;
 }
 
 /* ------------------------------------------------------------------- grips */
@@ -94,6 +115,7 @@ main.reader.no-preview .viewport {
    dragged only the guide line follows the pointer, and the real width -- with
    the iframe reflow that comes with it -- is applied once, on release. */
 .grip {
+  position: relative;
   flex: 0 0 6px;
   cursor: col-resize;
   background: transparent;
@@ -376,4 +398,45 @@ main.reader.no-preview .viewport {
     bottom: max(18px, env(safe-area-inset-bottom));
     transform: translateX(-50%);
   }
+}
+
+/* --------------------------------------------------------- layout menu */
+
+/* A line in the menu behind the layout button, which is where everything about
+   arranging the two panes lives: which side the source is on, the ratios a
+   drag sticks to, and whether a click in one pane takes the other along. */
+.menuitem {
+  display: flex;
+  align-items: center;
+  gap: --spacing(2);
+  padding: --spacing(1.5) --spacing(2);
+  border-radius: var(--radius-base);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.menuitem:hover,
+.menuitem[data-highlighted] {
+  background: var(--color-primary-100-900);
+}
+
+/* A separator holding one of the named ratios says so, so the split can be
+   felt as well as seen. */
+.grip-guide.held {
+  width: 3px;
+  background: var(--color-primary-500);
+}
+
+/* The quiet sign that clicking in one pane no longer takes the other along.
+   Not a control: the toolbar is not where a preference set once belongs. */
+.grip-aside {
+  position: absolute;
+  top: --spacing(2);
+  left: 50%;
+  translate: -50% 0;
+  color: var(--color-surface-500);
+  pointer-events: none;
+}
+.grip-aside svg {
+  width: --spacing(3);
+  height: --spacing(3);
 }
