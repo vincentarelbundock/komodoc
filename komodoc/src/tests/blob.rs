@@ -1,0 +1,266 @@
+//! The seam every store goes through. What is tested here is the contract
+//! itself -- an absent object, a conditional write, a listing -- because two
+//! implementations have to agree on it.
+
+use std::sync::Arc;
+
+use crate::blob::{
+    clear_storage, document_key, document_prefix, room_key, room_lock_key, source_key,
+    take_room_lock, version_of, BlobError, BlobStore, FsStore, RoomLock, INDEX_KEY,
+    LOCK_STALE_SECONDS,
+};
+use crate::clock::{format_unix, now_unix};
+use crate::storage::migrate_legacy_source;
+
+#[tokio::test]
+async fn blob_store_contract() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs = FsStore::new(dir.path());
+
+    assert!(matches!(
+        blobs.get("documents/absent/x.html").await,
+        Err(BlobError::NotFound)
+    ));
+
+    blobs
+        .put(
+            &document_key("a-paper", "abc"),
+            b"<p>hello</p>".to_vec(),
+            "text/html",
+        )
+        .await
+        .unwrap();
+    let (body, at) = blobs
+        .get_versioned(&document_key("a-paper", "abc"))
+        .await
+        .unwrap();
+    assert_eq!(body, b"<p>hello</p>");
+    assert!(!at.is_empty(), "a stored object has no version");
+
+    // A version has the property the index depends on: it changes when the
+    // content does, and only then.
+    blobs
+        .put(
+            &document_key("a-paper", "abc"),
+            b"<p>hello</p>".to_vec(),
+            "text/html",
+        )
+        .await
+        .unwrap();
+    let (_, again) = blobs
+        .get_versioned(&document_key("a-paper", "abc"))
+        .await
+        .unwrap();
+    assert_eq!(again, at, "rewriting the same bytes changed the version");
+
+    // Listing is by prefix, and says nothing about what is outside it.
+    blobs
+        .put(&source_key("a-paper"), b"# hello".to_vec(), "text/plain")
+        .await
+        .unwrap();
+    let found = blobs.list(&document_prefix("a-paper")).await.unwrap();
+    assert!(
+        found.len() == 1 && found[0].key == document_key("a-paper", "abc"),
+        "{found:?}"
+    );
+
+    // Deleting something that is not there is the outcome asked for, not an
+    // error: callers delete a source that may never have existed.
+    blobs
+        .delete(&[source_key("never-published")])
+        .await
+        .unwrap();
+}
+
+// The compare-and-swap the index rides on. Everything else in the store is a
+// plain write; this is the one operation whose failure loses a document.
+#[tokio::test]
+async fn swap_is_conditional() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs = FsStore::new(dir.path());
+
+    // The empty version means "only if it does not exist".
+    let first = blobs
+        .swap(INDEX_KEY, br#"{"a":1}"#.to_vec(), "")
+        .await
+        .unwrap();
+    assert!(matches!(
+        blobs.swap(INDEX_KEY, br#"{"b":2}"#.to_vec(), "").await,
+        Err(BlobError::Conflict)
+    ));
+
+    // The wrong version is refused, and leaves the object alone.
+    assert!(matches!(
+        blobs
+            .swap(INDEX_KEY, br#"{"c":3}"#.to_vec(), "\"nonsense\"")
+            .await,
+        Err(BlobError::Conflict)
+    ));
+    let (body, _) = blobs.get_versioned(INDEX_KEY).await.unwrap();
+    assert_eq!(body, br#"{"a":1}"#, "a refused write changed the object");
+
+    // And the right one goes through.
+    blobs
+        .swap(INDEX_KEY, br#"{"d":4}"#.to_vec(), &first)
+        .await
+        .expect("a write against the current version was refused");
+}
+
+// Two writers racing for the index must not both believe they won, whichever
+// of them the runtime happens to schedule first.
+#[tokio::test]
+async fn swap_under_contention() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs: Arc<dyn BlobStore> = Arc::new(FsStore::new(dir.path()));
+    // The starting bytes are distinct from every racer's, so a racer that
+    // happened to write the same content -- and so leave the version
+    // unchanged -- cannot make a second writer look like a winner.
+    let at = blobs.swap(INDEX_KEY, b"start".to_vec(), "").await.unwrap();
+
+    let mut racers = Vec::new();
+    for n in 0..8 {
+        let blobs = blobs.clone();
+        let at = at.clone();
+        racers.push(tokio::spawn(async move {
+            blobs
+                .swap(INDEX_KEY, format!("racer {n}").into_bytes(), &at)
+                .await
+                .is_ok()
+        }));
+    }
+    let mut wins = 0;
+    for racer in racers {
+        if racer.await.unwrap() {
+            wins += 1;
+        }
+    }
+    assert_eq!(wins, 1, "{wins} writers thought they won; want exactly one");
+}
+
+// Seeding starts from nothing, and on a bucket somebody else supplied,
+// "nothing" means komodoc's own keys. Whatever else is in there is not ours
+// to remove -- that is the whole difference between a bucket we made and a
+// bucket we were lent.
+#[tokio::test]
+async fn clearing_leaves_what_is_not_ours() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs = FsStore::new(dir.path());
+    for key in [
+        INDEX_KEY.to_string(),
+        document_key("a", "1"),
+        source_key("a"),
+        room_key("a"),
+    ] {
+        blobs.put(&key, b"ours".to_vec(), "").await.unwrap();
+    }
+    blobs
+        .put("someone-elses/backup.tar", b"theirs".to_vec(), "")
+        .await
+        .unwrap();
+
+    clear_storage(&blobs).await;
+
+    assert!(
+        matches!(blobs.get(INDEX_KEY).await, Err(BlobError::NotFound)),
+        "the index survived a clear"
+    );
+    assert_eq!(
+        blobs.get("someone-elses/backup.tar").await.unwrap(),
+        b"theirs",
+        "clearing removed something that was not ours"
+    );
+}
+
+// The source used to sit inside the document's directory and now has a key of
+// its own. A store written by the old layout keeps working, and is moved once.
+#[tokio::test]
+async fn legacy_source_is_migrated() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs = FsStore::new(dir.path());
+    blobs
+        .put("documents/a-paper/source.txt", b"# was here".to_vec(), "")
+        .await
+        .unwrap();
+
+    assert_eq!(migrate_legacy_source(&blobs).await, 1);
+    assert_eq!(
+        blobs.get(&source_key("a-paper")).await.unwrap(),
+        b"# was here"
+    );
+    assert!(
+        matches!(
+            blobs.get("documents/a-paper/source.txt").await,
+            Err(BlobError::NotFound)
+        ),
+        "copied but not moved"
+    );
+    // And running again does nothing, which is what makes it safe at startup.
+    assert_eq!(migrate_legacy_source(&blobs).await, 0);
+}
+
+// A key that escaped the directory would be a serious thing to get wrong.
+#[tokio::test]
+async fn a_key_cannot_escape_the_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().parent().unwrap().join("komodoc-escaped");
+    let _ = std::fs::remove_file(&outside);
+    let blobs = FsStore::new(dir.path().join("data"));
+    let _ = blobs
+        .put("../../komodoc-escaped", b"escaped".to_vec(), "")
+        .await;
+    assert!(
+        !outside.exists(),
+        "a key wrote outside the storage directory"
+    );
+}
+
+/* ------------------------------------------------------------ room locks */
+
+// Two servers on one bucket must not both write the same room: the in-memory
+// copy is authoritative while anyone is connected, so the second would save
+// over the first's comments without either noticing.
+#[tokio::test]
+async fn a_room_is_held_by_one_server() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs = FsStore::new(dir.path());
+    assert!(
+        take_room_lock(&blobs, "a-paper", "server-one").await.0,
+        "the first server could not take the lock"
+    );
+    let (held, by) = take_room_lock(&blobs, "a-paper", "server-two").await;
+    assert!(!held, "a second server took a lock the first one holds");
+    assert_eq!(by, "server-one", "the refusal named the wrong holder");
+    // The holder may say so again: refreshing is not contention.
+    assert!(
+        take_room_lock(&blobs, "a-paper", "server-one").await.0,
+        "the holder could not refresh its own lock"
+    );
+}
+
+#[tokio::test]
+async fn a_stale_room_lock_is_taken_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let blobs = FsStore::new(dir.path());
+    let old = RoomLock {
+        holder: "server-that-died".into(),
+        taken: format_unix(now_unix() - 2 * LOCK_STALE_SECONDS),
+    };
+    blobs
+        .put(
+            &room_lock_key("a-paper"),
+            serde_json::to_vec(&old).unwrap(),
+            "",
+        )
+        .await
+        .unwrap();
+    assert!(
+        take_room_lock(&blobs, "a-paper", "server-two").await.0,
+        "a lock whose holder is long gone was not taken over"
+    );
+}
+
+#[test]
+fn a_version_is_the_digest_of_the_bytes() {
+    assert_eq!(version_of(b"a"), version_of(b"a"));
+    assert_ne!(version_of(b"a"), version_of(b"b"));
+}

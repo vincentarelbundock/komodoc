@@ -26,9 +26,12 @@
 // is only ever fetched by someone who opens a typst document to edit, and both
 // are served immutable: once, per browser, per build.
 
+// Where this build serves its renderers. The URLs carry a digest of the
+// module's own bytes and are substituted in when the shell is loaded, so a
+// module cached for a year cannot outlive the loader that speaks to it.
 const MODULES = {
-  markdown: "/wasm/markdown.wasm",
-  typst: "/wasm/typst.wasm",
+  markdown: "__MARKDOWN_WASM__",
+  typst: "__TYPST_WASM__",
 };
 
 const loads = {}; // each module's load, started once and shared

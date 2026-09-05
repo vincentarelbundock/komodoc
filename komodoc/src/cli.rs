@@ -1,0 +1,583 @@
+//! The command line: publishing, listing, opening, signing in. Every command
+//! here talks to a deployment over HTTP, the way a browser does.
+
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+
+use serde_json::{json, Value};
+
+use crate::auth::{login_for, GITHUB_DEVICE, GITHUB_TOKEN};
+use crate::config::Configuration;
+use crate::http::{detail_of, get_json, post_json, send, text, truncate};
+use crate::render::{
+    is_markdown, is_typst, render_markdown_document, render_typst_document, title_from_markdown,
+    title_from_typst,
+};
+use crate::util::{die, is_terminal_stdin, is_terminal_stdout, read_line};
+
+pub fn server_from(flag: &str) -> String {
+    let mut server = flag.to_string();
+    if server.is_empty() {
+        server = std::env::var("KOMODOC_SERVER").unwrap_or_default();
+    }
+    if server.is_empty() {
+        die("set --server or $KOMODOC_SERVER");
+    }
+    server.trim_end_matches('/').to_string()
+}
+
+/* --------------------------------------------------------------- login */
+
+// The CLI signs in with GitHub's device flow: it asks for a code, you type
+// that code into a browser anywhere, and the token lands here. No callback URL
+// and no local web server, so it works over SSH and on a machine with no
+// browser of its own.
+
+/// Where the GitHub token is cached, following XDG.
+pub fn token_path() -> PathBuf {
+    let base = match std::env::var("XDG_CONFIG_HOME") {
+        Ok(base) if !base.is_empty() => PathBuf::from(base),
+        _ => {
+            let home = std::env::var("HOME")
+                .ok()
+                .filter(|h| !h.is_empty())
+                .unwrap_or_else(|| die("no home directory to store the token in"));
+            Path::new(&home).join(".config")
+        }
+    };
+    base.join("komodoc").join("token")
+}
+
+/// The GitHub token to send, from the environment or the cache written by
+/// `komodoc login`.
+pub fn stored_token() -> String {
+    if let Ok(token) = std::env::var("KOMODOC_TOKEN") {
+        if !token.trim().is_empty() {
+            return token.trim().to_string();
+        }
+    }
+    std::fs::read_to_string(token_path())
+        .map(|raw| raw.trim().to_string())
+        .unwrap_or_default()
+}
+
+/// What every command that writes needs.
+pub fn require_token() -> String {
+    let token = stored_token();
+    if token.is_empty() {
+        die("not signed in. Run:\n    komodoc login");
+    }
+    token
+}
+
+pub async fn login(mut client_id: String, server_flag: String) {
+    if client_id.is_empty() {
+        // The deployment knows its own client id, and it is not a secret.
+        let server = server_from(&server_flag);
+        if let Ok((200, payload)) = get_json(
+            &format!("{server}/api/auth/config"),
+            Duration::from_secs(30),
+        )
+        .await
+        {
+            client_id = text(&payload, "client_id");
+        }
+        if client_id.is_empty() {
+            die("could not find the GitHub client id.\n  Pass it with --client-id, or point --server at your deployment.");
+        }
+    }
+
+    let code = request_device_code(&client_id)
+        .await
+        .unwrap_or_else(|err| die(format!("could not start the sign-in: {err}")));
+    eprintln!(
+        "\n  Open {}\n  and enter the code:  {}\n",
+        code.verification_uri, code.user_code
+    );
+    eprint!("  waiting for you to approve it");
+
+    let token = poll_for_token(&client_id, &code).await;
+    eprintln!();
+    let token = token.unwrap_or_else(|err| die(err));
+
+    let who = login_for(&token).await.unwrap_or_else(|err| {
+        die(format!(
+            "signed in, but GitHub would not say who you are: {err}"
+        ))
+    });
+
+    let path = token_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .unwrap_or_else(|err| die(format!("could not create {}: {err}", parent.display())));
+    }
+    std::fs::write(&path, format!("{token}\n"))
+        .unwrap_or_else(|err| die(format!("could not write {}: {err}", path.display())));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    println!("signed in as {}", who.login);
+    eprintln!("  token stored in {}", path.display());
+}
+
+pub fn logout() {
+    let path = token_path();
+    match std::fs::remove_file(&path) {
+        Ok(()) => println!("signed out"),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => println!("not signed in"),
+        Err(err) => die(format!("could not remove {}: {err}", path.display())),
+    }
+}
+
+struct DeviceCode {
+    device_code: String,
+    user_code: String,
+    verification_uri: String,
+    expires_in: u64,
+    interval: u64,
+}
+
+async fn request_device_code(client_id: &str) -> Result<DeviceCode, String> {
+    let body = serde_json::to_vec(&json!({"client_id": client_id, "scope": ""}))
+        .map_err(|e| e.to_string())?;
+    let (status, raw) = send(
+        reqwest::Method::POST,
+        GITHUB_DEVICE,
+        &[
+            ("content-type", "application/json"),
+            ("accept", "application/json"),
+        ],
+        Some(body),
+        Duration::from_secs(30),
+    )
+    .await?;
+    let payload: Value = serde_json::from_slice(&raw).unwrap_or(Value::Null);
+    let device_code = text(&payload, "device_code");
+    if device_code.is_empty() {
+        return Err(format!(
+            "github returned {status}: {}",
+            truncate(&String::from_utf8_lossy(&raw), 200)
+        ));
+    }
+    Ok(DeviceCode {
+        device_code,
+        user_code: text(&payload, "user_code"),
+        verification_uri: text(&payload, "verification_uri"),
+        expires_in: payload
+            .get("expires_in")
+            .and_then(Value::as_u64)
+            .unwrap_or(0),
+        interval: payload
+            .get("interval")
+            .and_then(Value::as_u64)
+            .filter(|i| *i > 0)
+            .unwrap_or(5),
+    })
+}
+
+/// Waits for the code to be approved, at the interval GitHub asks for and no
+/// faster: polling too eagerly earns a slow_down.
+async fn poll_for_token(client_id: &str, code: &DeviceCode) -> Result<String, String> {
+    let deadline = std::time::Instant::now() + Duration::from_secs(code.expires_in.max(300));
+    let mut interval = Duration::from_secs(code.interval);
+    while std::time::Instant::now() < deadline {
+        tokio::time::sleep(interval).await;
+        eprint!(".");
+        let body = serde_json::to_vec(&json!({
+            "client_id": client_id, "device_code": code.device_code,
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+        }))
+        .map_err(|e| e.to_string())?;
+        let Ok((_, raw)) = send(
+            reqwest::Method::POST,
+            GITHUB_TOKEN,
+            &[
+                ("content-type", "application/json"),
+                ("accept", "application/json"),
+            ],
+            Some(body),
+            Duration::from_secs(30),
+        )
+        .await
+        else {
+            continue;
+        };
+        let Ok(reply) = serde_json::from_slice::<Value>(&raw) else {
+            continue;
+        };
+        let token = text(&reply, "access_token");
+        if !token.is_empty() {
+            return Ok(token);
+        }
+        match text(&reply, "error").as_str() {
+            "authorization_pending" | "" => {}
+            "slow_down" => interval += Duration::from_secs(5),
+            "access_denied" => return Err("sign-in was denied".into()),
+            other => return Err(format!("github said: {other}")),
+        }
+    }
+    Err("the code expired before it was approved".into())
+}
+
+/* ------------------------------------------------------------- publish */
+
+pub async fn publish(file: &str, mut title: String, slug: String, server_flag: String) {
+    let path = Path::new(file);
+    let Ok(info) = std::fs::metadata(path) else {
+        die(format!("file not found: {file}"))
+    };
+    if info.is_dir() {
+        die(format!("file not found: {file}"));
+    }
+    let base_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default();
+    // What is stored is always HTML: the reader frames the document and
+    // anchors comments into its text nodes. Markdown and typst are rendered
+    // here, before they are uploaded.
+    let extension = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if extension != "html" && extension != "htm" && !is_markdown(file) && !is_typst(file) {
+        die(format!(
+            "{base_name} is not a document Komodoc can serve.\n\n  \
+             It takes HTML, or markdown or typst, which it renders for you.\n  \
+             From Quarto:\n    quarto render paper.qmd --to html -M embed-resources:true"
+        ));
+    }
+    let raw =
+        std::fs::read(path).unwrap_or_else(|err| die(format!("could not read {file}: {err}")));
+    let config = Configuration::default();
+    if raw.len() > config.max_html {
+        die(format!(
+            "document exceeds the {} MB limit",
+            config.max_html / (1024 * 1024)
+        ));
+    }
+    let Ok(mut html) = String::from_utf8(raw.clone()) else {
+        die(format!("{base_name} is not valid UTF-8 text"))
+    };
+    // Kept beside the rendered document so it can be reopened in the editor.
+    // A document published as HTML is its own source and keeps none.
+    let (mut source, mut source_format) = (String::new(), String::new());
+
+    if is_typst(file) {
+        if title.is_empty() {
+            // The first heading names the document, before the filename does.
+            title = title_from_typst(&html);
+        }
+        let rendered = render_typst_document(path, &html, &title_or(&title, file))
+            .unwrap_or_else(|err| die(err));
+        eprintln!("rendered {base_name} ({} KiB of typst)", raw.len() / 1024);
+        source = html;
+        source_format = "typst".to_string();
+        html = rendered;
+    } else if is_markdown(file) {
+        if title.is_empty() {
+            title = title_from_markdown(&html);
+        }
+        let rendered = render_markdown_document(&html, &title_or(&title, file));
+        eprintln!(
+            "rendered {base_name} ({} KiB of markdown)",
+            raw.len() / 1024
+        );
+        source = html;
+        source_format = "markdown".to_string();
+        html = rendered;
+    } else if !html.contains('<') {
+        die(format!("{base_name} contains no HTML tags"));
+    }
+
+    let server = server_from(&server_flag);
+    if title.is_empty() && !slug.is_empty() {
+        // Publishing a revision: keep the title the document already has
+        // rather than silently renaming it after the file on disk.
+        if let Ok((200, existing)) = get_json(
+            &format!("{server}/api/documents/{slug}"),
+            Duration::from_secs(30),
+        )
+        .await
+        {
+            title = text(&existing, "title");
+        }
+    }
+    if title.is_empty() {
+        title = title_or("", file);
+    }
+
+    // stored_token, not require_token: a deployment whose publishers are
+    // "anyone" takes documents with no sign-in, and one that does need an
+    // account answers with its own message.
+    let (status, document) = post_json(
+        &format!("{server}/api/documents"),
+        &json!({"title": title, "slug": slug, "html": html, "source": source, "source_format": source_format}),
+        &stored_token(),
+        Duration::from_secs(300),
+    )
+    .await
+    .unwrap_or_else(|err| die(err));
+    if status != 201 {
+        die(format!(
+            "upload failed ({status}): {}",
+            detail_of(&document)
+        ));
+    }
+
+    let link = format!("{server}{}", text(&document, "url"));
+    println!("{link}");
+    if is_terminal_stdout() {
+        eprintln!(
+            "\nShare this link; anyone with it can comment, no account needed.\n\
+             To publish a revision to the same link:\n  komodoc publish {file} --slug {}",
+            text(&document, "slug")
+        );
+    }
+}
+
+/// Falls back to the filename, the way an untitled document is named.
+pub fn title_or(title: &str, file: &str) -> String {
+    if !title.trim().is_empty() {
+        return title.to_string();
+    }
+    let stem = Path::new(file)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    stem.replace(['_', '-'], " ").trim().to_string()
+}
+
+/* ------------------------------------------------------------ listing */
+
+pub async fn list_documents(server_flag: String) {
+    let server = server_from(&server_flag);
+    let (status, payload) = post_json(
+        &format!("{server}/api/list"),
+        &json!({}),
+        &require_token(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap_or_else(|err| die(err));
+    if status != 200 {
+        die(format!(
+            "listing failed ({status}): {}",
+            detail_of(&payload)
+        ));
+    }
+    let documents = payload
+        .get("documents")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    if documents.is_empty() {
+        println!("no documents yet");
+        return;
+    }
+    let ids = short_ids(&documents, &Configuration::default());
+    let width = ids.values().map(String::len).max().unwrap_or(0);
+    for document in &documents {
+        let mut updated = text(document, "updated_at");
+        updated.truncate(10);
+        let slug = text(document, "slug");
+        println!(
+            "{:<width$}  {}  {}",
+            ids.get(&slug).cloned().unwrap_or_default(),
+            updated,
+            text(document, "title")
+        );
+    }
+}
+
+/// The shortest handle `list` will print. One character is unique today and
+/// ambiguous after the next publish, and it reads as a typo rather than a
+/// name; three is short enough to type and stable enough to keep in a note.
+const SHORT_ID_MINIMUM: usize = 3;
+
+/// Gives each listed document a short handle: a prefix of its generated random
+/// suffix (or explicit slug). Every handle is cut to the same width -- ragged
+/// ids are hard to read down a column and hard to remember -- which is the
+/// longest prefix any one document needs to be unambiguous, and never fewer
+/// than three characters.
+pub fn short_ids(
+    documents: &[Value],
+    config: &Configuration,
+) -> std::collections::HashMap<String, String> {
+    let items: Vec<(String, String)> = documents
+        .iter()
+        .filter_map(|document| {
+            let slug = document.get("slug")?.as_str()?.to_string();
+            let last = slug.rsplit('-').next().unwrap_or(&slug).to_string();
+            let key = if last.len() == config.suffix_length
+                && last.chars().all(|c| config.suffix_alphabet.contains(c))
+            {
+                last
+            } else {
+                slug.clone()
+            };
+            Some((slug, key))
+        })
+        .collect();
+
+    let mut width = SHORT_ID_MINIMUM;
+    for (_, key) in &items {
+        let mut needed = key.len();
+        for length in 1..=key.len() {
+            let prefix = &key[..length];
+            if items
+                .iter()
+                .filter(|(_, other)| other.starts_with(prefix))
+                .count()
+                == 1
+            {
+                needed = length;
+                break;
+            }
+        }
+        width = width.max(needed);
+    }
+
+    items
+        .into_iter()
+        .map(|(slug, key)| {
+            // A key shorter than the common width is used whole; it is already
+            // as distinct as it will ever be.
+            let id = if width < key.len() {
+                key[..width].to_string()
+            } else {
+                key
+            };
+            (slug, id)
+        })
+        .collect()
+}
+
+/// Turns what the user typed -- a full slug, or one of the short handles
+/// `list` prints -- into the slug the API knows.
+pub async fn resolve_identifier(identifier: &str, server: &str) -> String {
+    // A full slug needs no listing, and so no token: this is the path an
+    // export from a link someone sent takes.
+    if let Ok((200, _)) = get_json(
+        &format!("{server}/api/documents/{identifier}"),
+        Duration::from_secs(30),
+    )
+    .await
+    {
+        return identifier.to_string();
+    }
+    let (status, payload) = post_json(
+        &format!("{server}/api/list"),
+        &json!({}),
+        &require_token(),
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap_or_else(|err| die(err));
+    if status != 200 {
+        die(format!(
+            "listing failed ({status}): {}",
+            detail_of(&payload)
+        ));
+    }
+    let documents = payload
+        .get("documents")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let ids = short_ids(&documents, &Configuration::default());
+    let mut found = String::new();
+    for document in &documents {
+        let slug = text(document, "slug");
+        if identifier == slug || ids.get(&slug).is_some_and(|id| id == identifier) {
+            if !found.is_empty() {
+                die(format!("{identifier:?} matches more than one document"));
+            }
+            found = slug;
+        }
+    }
+    if found.is_empty() {
+        die(format!("no visible document matches {identifier:?}"));
+    }
+    found
+}
+
+pub async fn comment_document(identifier: &str, server_flag: String) {
+    let server = server_from(&server_flag);
+    let slug = resolve_identifier(identifier, &server).await;
+    open_url(&format!("{server}/docs/{slug}"));
+}
+
+/// `komodoc edit` opens a document in the reader, with its source beside it.
+/// The editor is part of the reader rather than a program of its own, so this
+/// is what it should be: a way to get to the right page from a short id.
+pub async fn edit_document(identifier: &str, server_flag: String) {
+    comment_document(identifier, server_flag).await;
+}
+
+pub fn open_url(target: &str) {
+    let (command, args): (&str, Vec<&str>) = if cfg!(target_os = "macos") {
+        ("open", vec![target])
+    } else if cfg!(target_os = "windows") {
+        ("rundll32", vec!["url.dll,FileProtocolHandler", target])
+    } else {
+        ("xdg-open", vec![target])
+    };
+    if let Err(err) = std::process::Command::new(command).args(args).spawn() {
+        die(format!("could not open {target}: {err}"));
+    }
+}
+
+/* ------------------------------------------------------------- destroy */
+
+pub async fn destroy_document(identifier: &str, server_flag: String, yes: bool) {
+    let server = server_from(&server_flag);
+    // The same identifier `comment` and `export` take. The confirmation
+    // below still asks for the whole slug: this is the one irreversible
+    // command, and a three-character answer is too easy to give.
+    let slug = resolve_identifier(identifier, &server).await;
+    let (status, document) = get_json(
+        &format!("{server}/api/documents/{slug}"),
+        Duration::from_secs(30),
+    )
+    .await
+    .unwrap_or_else(|err| die(err));
+    if status != 200 {
+        die(format!("no document with the slug {slug:?} at {server}"));
+    }
+    let count = document
+        .get("comment_count")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    println!("About to permanently delete from {server}:");
+    println!("  {slug}  {}", text(&document, "title"));
+    println!("  {count} comment(s), and every reply to them");
+    println!("\nThe document, its history and its comments all go. The link stops");
+    println!("working. Nothing else on this deployment is touched.");
+
+    if !yes {
+        if !is_terminal_stdin() {
+            die("refusing to delete without a terminal to confirm at; pass --yes if you are certain");
+        }
+        eprint!("\nType '{slug}' to confirm: ");
+        if read_line() != slug {
+            println!("aborted, nothing was deleted");
+            return;
+        }
+    }
+
+    let (status, payload) = post_json(
+        &format!("{server}/api/documents/{slug}/delete"),
+        &json!({}),
+        &require_token(),
+        Duration::from_secs(120),
+    )
+    .await
+    .unwrap_or_else(|err| die(err));
+    if status != 200 {
+        die(format!("delete failed ({status}): {}", detail_of(&payload)));
+    }
+    println!("deleted {slug}");
+}

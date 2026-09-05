@@ -15,7 +15,7 @@ BIN_DIR="${KOMODOC_BIN_DIR:-$HOME/.local/bin}"
 
 die() { printf 'install: %s\n' "$*" >&2; exit 1; }
 
-# The release archives are named for Go's own GOOS and GOARCH.
+# The release archives are named for the platform they were built for.
 case "$(uname -s)" in
 	Linux)   os=linux ;;
 	Darwin)  os=darwin ;;

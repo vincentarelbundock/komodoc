@@ -1,7 +1,5 @@
 dist/
 komodoc-data/
-/komodoc
-/src/src
 examples/*.html
 # ...except this one, which is the hand-written HTML example: it is a source
 # file that no tool renders, which is the whole point of it.
@@ -24,4 +22,4 @@ src/shell/wasm/
 target/
 
 # The Cargo lockfile is committed: this builds a binary, not a library.
-dist/
+!Cargo.lock

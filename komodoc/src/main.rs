@@ -1,0 +1,276 @@
+//! Komodoc: host HTML, markdown and typst documents that readers can
+//! annotate. One binary: the server, and the command line that talks to it.
+
+mod assets;
+mod auth;
+mod blob;
+mod cli;
+mod clock;
+mod config;
+mod export;
+mod http;
+mod origins;
+mod render;
+mod retention;
+mod room;
+mod s3;
+mod seed;
+mod seed_examples;
+mod serve;
+mod server;
+mod storage;
+mod store;
+mod util;
+
+#[cfg(test)]
+mod tests;
+
+use clap::{Args, Parser, Subcommand};
+
+use crate::config::Configuration;
+use crate::storage::StorageFlags;
+use crate::util::die;
+
+/// The release version, stamped in at build time. Unreleased builds keep the
+/// placeholder.
+pub const VERSION: &str = match option_env!("KOMODOC_VERSION") {
+    Some(version) => version,
+    None => "dev",
+};
+
+#[derive(Parser)]
+#[command(name = "komodoc", version = VERSION, about = "host HTML, markdown and typst documents that readers can annotate", long_about = None)]
+#[command(
+    after_help = "Serving needs a GitHub OAuth app (github.com/settings/developers) and
+--publishers saying which GitHub logins may publish. Publishing needs neither,
+only the server and a sign-in:
+
+    export KOMODOC_SERVER=https://komodoc.example.org
+    komodoc login"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+/// The options that describe a running service rather than where it runs:
+/// who may publish and comment, how large a document may be, and when
+/// documents expire.
+#[derive(Args, Clone, Debug, Default)]
+struct ServiceFlags {
+    /// GitHub OAuth app client id; or $KOMODOC_GITHUB_CLIENT_ID
+    #[arg(long, value_name = "ID")]
+    client_id: Option<String>,
+    /// GitHub OAuth app client secret; or $KOMODOC_GITHUB_CLIENT_SECRET
+    #[arg(long, value_name = "SECRET")]
+    client_secret: Option<String>,
+    /// Who may publish: a GitHub login, a comma-separated list, 'any', or 'anyone'
+    #[arg(long, value_name = "WHO")]
+    publishers: Option<String>,
+    /// Who may comment: 'anyone' (default), 'any' GitHub account, or a list of logins
+    #[arg(long, value_name = "WHO")]
+    commenters: Option<String>,
+    /// Largest document accepted, in megabytes (default 4)
+    #[arg(long, value_name = "MB", default_value_t = 0)]
+    max_size: usize,
+    /// Most one publisher may store across their documents, in megabytes (default 100)
+    #[arg(long, value_name = "MB", default_value_t = 0)]
+    quota: i64,
+    /// Most the whole deployment will store, in megabytes (default 5120)
+    #[arg(long, value_name = "MB", default_value_t = 0)]
+    storage: i64,
+    /// Most documents one publisher may hold (default 50)
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    max_documents: i64,
+    /// Most uploads one publisher may make in an hour (default 30)
+    #[arg(long, value_name = "N", default_value_t = 0)]
+    uploads_per_hour: i64,
+    /// Delete documents after this duration, for example 24h or 30d (default never)
+    #[arg(long, value_name = "DURATION")]
+    expire_after: Option<String>,
+    /// Start expiry at 'updated' (default; last publication) or 'created'
+    #[arg(long, value_name = "FROM")]
+    expire_from: Option<String>,
+}
+
+impl ServiceFlags {
+    fn configuration(&self) -> Configuration {
+        let mut config = Configuration::default();
+        if let Err(err) = config.set_max_html(self.max_size) {
+            die(err);
+        }
+        if let Err(err) = config.set_storage(self.quota, self.storage) {
+            die(err);
+        }
+        if let Err(err) = config.set_counts(self.max_documents, self.uploads_per_hour) {
+            die(err);
+        }
+        config
+    }
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Sign in with GitHub (device flow)
+    Login {
+        /// GitHub OAuth app client id; asked of the deployment when absent
+        #[arg(long, value_name = "ID")]
+        client_id: Option<String>,
+        /// Deployment URL; defaults to $KOMODOC_SERVER
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Forget the stored sign-in
+    Logout,
+    /// Publish a document and print its link
+    Publish {
+        /// The HTML, markdown or typst file to publish
+        file: String,
+        /// Display title; defaults to the first heading, then the filename
+        #[arg(long, value_name = "TITLE")]
+        title: Option<String>,
+        /// Full existing slug to replace, keeping link and comments
+        #[arg(long, value_name = "SLUG")]
+        slug: Option<String>,
+        /// Deployment URL; defaults to $KOMODOC_SERVER
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Run the service on this machine
+    Serve {
+        /// Port to listen on; default is the first free one from 8080 to 8099
+        #[arg(long, value_name = "PORT", default_value_t = 0)]
+        port: u16,
+        #[command(flatten)]
+        service: ServiceFlags,
+        #[command(flatten)]
+        storage: StorageFlags,
+    },
+    /// List your documents
+    List {
+        /// Deployment URL; defaults to $KOMODOC_SERVER
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Open a document for commenting
+    Comment {
+        /// A full slug, or one of the short handles `list` prints
+        id: String,
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Edit a markdown or typst document, with live preview
+    Edit {
+        /// A full slug, or one of the short handles `list` prints
+        id: String,
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Annotations as W3C JSON-LD or markdown
+    Export {
+        /// A full slug, or one of the short handles `list` prints
+        id: String,
+        /// jsonld (W3C Web Annotation) or markdown
+        #[arg(long, value_name = "FORMAT", default_value = "jsonld")]
+        format: String,
+        /// File to write; defaults to standard output
+        #[arg(long, value_name = "FILE")]
+        out: Option<String>,
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Replace local or remote data with the example documents
+    Seed {
+        #[command(flatten)]
+        storage: StorageFlags,
+        /// Deployment URL to wipe and fill instead of local storage
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+    },
+    /// Delete one document and its comments
+    Destroy {
+        /// The document to delete, by ID or slug
+        #[arg(long, value_name = "ID")]
+        document: String,
+        #[arg(long, value_name = "URL")]
+        server: Option<String>,
+        /// Skip the confirmation prompt (dangerous)
+        #[arg(long)]
+        yes: bool,
+    },
+}
+
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    match cli.command {
+        Command::Login { client_id, server } => {
+            cli::login(client_id.unwrap_or_default(), server.unwrap_or_default()).await
+        }
+        Command::Logout => cli::logout(),
+        Command::Publish {
+            file,
+            title,
+            slug,
+            server,
+        } => {
+            cli::publish(
+                &file,
+                title.unwrap_or_default(),
+                slug.unwrap_or_default(),
+                server.unwrap_or_default(),
+            )
+            .await
+        }
+        Command::Serve {
+            port,
+            service,
+            storage,
+        } => {
+            let config = service.configuration();
+            serve::serve(serve::ServeOptions {
+                port,
+                storage: storage.options(),
+                client_id: service.client_id.unwrap_or_default(),
+                client_secret: service.client_secret.unwrap_or_default(),
+                publishers: service.publishers.unwrap_or_default(),
+                commenters: service.commenters.unwrap_or_default(),
+                expire_after: service.expire_after.unwrap_or_default(),
+                expire_from: service.expire_from.unwrap_or_default(),
+                config,
+            })
+            .await
+        }
+        Command::List { server } => cli::list_documents(server.unwrap_or_default()).await,
+        Command::Comment { id, server } => {
+            cli::comment_document(&id, server.unwrap_or_default()).await
+        }
+        Command::Edit { id, server } => cli::edit_document(&id, server.unwrap_or_default()).await,
+        Command::Export {
+            id,
+            format,
+            out,
+            server,
+        } => {
+            export::export_document(
+                &id,
+                server.unwrap_or_default(),
+                &format,
+                out.unwrap_or_default(),
+            )
+            .await
+        }
+        Command::Seed { storage, server } => {
+            let documents = seed_examples::seed_documents();
+            match server {
+                Some(server) if !server.is_empty() => seed::seed_remote(server, &documents).await,
+                _ => seed::seed(storage.options(), &documents).await,
+            }
+        }
+        Command::Destroy {
+            document,
+            server,
+            yes,
+        } => cli::destroy_document(&document, server.unwrap_or_default(), yes).await,
+    }
+}

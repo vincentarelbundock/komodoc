@@ -1,0 +1,441 @@
+//! Seeding fills an empty data directory with the example documents and a
+//! handful of annotations on each, so there is something to look at without
+//! signing in and uploading by hand.
+//!
+//! It writes to the store directly rather than over HTTP: it is a development
+//! command, run against a directory rather than a deployment, and going
+//! through the API would mean holding a GitHub token to talk to your own
+//! laptop.
+
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde::Serialize;
+use serde_json::{json, Value};
+
+use crate::blob::{clear_storage, release_room_locks};
+use crate::cli::{server_from, stored_token};
+use crate::clock::timestamp;
+use crate::config::Configuration;
+use crate::http::{detail_of, get_json, post_json, text};
+use crate::render::{is_markdown, is_typst, render_markdown_document, render_typst_document};
+use crate::room::{Comment, Message, Region, Reply, Room, RoomSet};
+use crate::storage::{open_storage, StorageOptions};
+use crate::store::{digest_of, example_suffix, slugify, Publication, Store};
+use crate::util::{die, new_id};
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct SeedAnnotation {
+    pub motivation: &'static str,
+    /// The passage to anchor to. It has to appear in the rendered document,
+    /// and it has to appear once: prefix and suffix are computed from wherever
+    /// it is found.
+    pub exact: &'static str,
+    pub body: &'static str,
+    pub tags: Vec<&'static str>,
+    pub creator: &'static str,
+    pub resolved: bool,
+    pub replies: Vec<&'static str>,
+    /// Annotates part of a figure instead of a passage, given as percentages
+    /// of the image.
+    pub region: Option<Region>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SeedDocument {
+    pub file: String,
+    pub title: &'static str,
+    pub annotations: Vec<SeedAnnotation>,
+}
+
+/// The HTML to store, and -- for the examples Komodoc renders itself -- the
+/// source it was rendered from. An example that keeps its source opens in
+/// the editor, which is the point of having one of each. The rest arrive as
+/// HTML from the tool that made them, and stay read-only, because Komodoc
+/// cannot render them again.
+pub fn read_seed_document(document: &SeedDocument) -> (String, String, String) {
+    let raw = std::fs::read_to_string(&document.file).unwrap_or_else(|err| {
+        die(format!(
+            "could not read {}: {err}\n\n  Run `make examples` first, which renders them.",
+            document.file
+        ))
+    });
+    if is_markdown(&document.file) {
+        return (
+            render_markdown_document(&raw, document.title),
+            raw,
+            "markdown".into(),
+        );
+    }
+    if is_typst(&document.file) {
+        let rendered = render_typst_document(Path::new(&document.file), &raw, document.title)
+            .unwrap_or_else(|err| die(format!("could not render {}: {err}", document.file)));
+        return (rendered, raw, "typst".into());
+    }
+    (raw, String::new(), String::new())
+}
+
+pub async fn seed(options: StorageOptions, documents: &[SeedDocument]) {
+    let blobs = open_storage(options).await.unwrap_or_else(|err| die(err));
+    let config = Arc::new(Configuration::default());
+    seed_into(blobs, config, documents).await;
+}
+
+/// Seeds a store, whatever holds it. Starts from nothing: seeding is for
+/// looking at the result, not for adding to whatever was there. Only
+/// komodoc's own keys go -- on a bucket the operator supplied, nothing else in
+/// it is ours to remove.
+pub async fn seed_into(
+    blobs: Arc<dyn crate::blob::BlobStore>,
+    config: Arc<Configuration>,
+    documents: &[SeedDocument],
+) {
+    clear_storage(blobs.as_ref()).await;
+    let store = Store::open(blobs.clone(), config.clone())
+        .await
+        .unwrap_or_else(|err| die(err));
+    let rooms = RoomSet::new(blobs.clone(), config.clone());
+    let mut seeded = Vec::new();
+
+    for document in documents {
+        let (raw, source, format) = read_seed_document(document);
+        let base = slugify(document.title, &config);
+        let slug = format!("{base}-{}", example_suffix(&base, &config));
+        let entry = store
+            .put(Publication {
+                slug: slug.clone(),
+                title: document.title.to_string(),
+                digest: digest_of(&raw),
+                html: raw.clone(),
+                source,
+                source_format: format,
+                ..Publication::default()
+            })
+            .await
+            .unwrap_or_else(|err| die(format!("could not store {}: {err}", document.file)));
+
+        let text = visible_text(&raw);
+        let room = rooms.get(&slug).await;
+        let (placed, missed) = seed_annotations(&room, &document.annotations, &text).await;
+        seeded.push(slug.clone());
+
+        println!("  {:<28} {}", entry.slug, document.title);
+        print!("      {placed} annotation(s)");
+        if missed > 0 {
+            // Worth saying out loud: a phrase that is not in the rendered
+            // document anchors nowhere, and the seed is meant to look right.
+            print!(", {missed} could not be anchored");
+        }
+        println!();
+    }
+    // The seeding is done, so nothing here is writing these rooms any more.
+    release_room_locks(blobs.as_ref(), &seeded).await;
+}
+
+/// Gives a deployment the same curated titles and annotations as the local
+/// seed. It deliberately replaces everything already there: a seed is a known
+/// demonstration state, not an additive publishing operation.
+pub async fn seed_remote(server_flag: String, documents: &[SeedDocument]) {
+    let server = server_from(&server_flag);
+    let token = stored_token();
+    let examples_enabled =
+        match get_json(&format!("{server}/api/me"), Duration::from_secs(30)).await {
+            Ok((200, capabilities)) => capabilities
+                .get("examples_enabled")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            _ => false,
+        };
+
+    let (status, listing) = post_json(
+        &format!("{server}/api/list"),
+        &json!({}),
+        &token,
+        Duration::from_secs(60),
+    )
+    .await
+    .unwrap_or_else(|err| die(err));
+    if status != 200 {
+        die(format!(
+            "could not list the deployment before seeding ({status}): {}",
+            detail_of(&listing)
+        ));
+    }
+    if !examples_enabled {
+        for document in listing
+            .get("documents")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+        {
+            let slug = text(&document, "slug");
+            let (status, result) = post_json(
+                &format!("{server}/api/documents/{slug}/delete"),
+                &json!({}),
+                &token,
+                Duration::from_secs(120),
+            )
+            .await
+            .unwrap_or_else(|err| die(err));
+            if status != 200 {
+                die(format!(
+                    "could not remove {slug} before seeding ({status}): {}",
+                    detail_of(&result)
+                ));
+            }
+        }
+    }
+
+    println!("seeding {server}");
+    let config = Configuration::default();
+    for document in documents {
+        let (raw, source, format) = read_seed_document(document);
+        let (status, uploaded) = post_json(
+            &format!("{server}/api/documents"),
+            &json!({
+                "title": document.title, "html": raw, "slug": slugify(document.title, &config),
+                "source": source, "source_format": format,
+                "example": true, "annotations": document.annotations,
+            }),
+            &token,
+            Duration::from_secs(300),
+        )
+        .await
+        .unwrap_or_else(|err| die(err));
+        if status != 201 {
+            die(format!(
+                "could not seed {} ({status}): {}",
+                document.file,
+                detail_of(&uploaded)
+            ));
+        }
+
+        let slug = text(&uploaded, "slug");
+        let (placed, missed) = if uploaded
+            .get("example")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            let visible = visible_text(&raw);
+            let missed = document
+                .annotations
+                .iter()
+                .filter(|a| a.region.is_none() && !visible.contains(a.exact))
+                .count();
+            (document.annotations.len() - missed, missed)
+        } else {
+            seed_remote_annotations(
+                &server,
+                &token,
+                &slug,
+                &document.annotations,
+                &visible_text(&raw),
+            )
+            .await
+        };
+        println!("  {slug:<28} {}", document.title);
+        print!("      {placed} annotation(s)");
+        if missed > 0 {
+            print!(", {missed} could not be anchored");
+        }
+        println!();
+    }
+}
+
+async fn seed_remote_annotations(
+    server: &str,
+    token: &str,
+    slug: &str,
+    annotations: &[SeedAnnotation],
+    visible: &str,
+) -> (usize, usize) {
+    let url = format!("{server}/api/documents/{slug}/comments");
+    let (mut placed, mut missed) = (0, 0);
+    for item in annotations {
+        let Some(spot) = anchor(item, visible) else {
+            missed += 1;
+            continue;
+        };
+        let incoming = Message {
+            kind: "comment".into(),
+            motivation: item.motivation.into(),
+            body: item.body.into(),
+            tags: item.tags.iter().map(|t| t.to_string()).collect(),
+            creator: item.creator.into(),
+            exact: item.exact.into(),
+            prefix: spot.prefix,
+            suffix: spot.suffix,
+            position: spot.position,
+            region: item.region.clone(),
+            ..Message::default()
+        };
+        let (status, result) = post_json(&url, &json!(incoming), token, Duration::from_secs(60))
+            .await
+            .unwrap_or_else(|err| die(err));
+        if status != 200 {
+            die(format!(
+                "could not seed an annotation on {slug} ({status}): {}",
+                detail_of(&result)
+            ));
+        }
+        let comment_id = result
+            .get("comment")
+            .map(|c| text(c, "id"))
+            .unwrap_or_default();
+        for body in &item.replies {
+            let (status, reply) = post_json(
+                &url,
+                &json!({"type": "reply", "comment_id": comment_id, "body": body, "creator": "Reviewer"}),
+                token,
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap_or_else(|err| die(err));
+            if status != 200 {
+                die(format!(
+                    "could not seed a reply on {slug} ({status}): {}",
+                    detail_of(&reply)
+                ));
+            }
+        }
+        if item.resolved {
+            let (status, resolved) = post_json(
+                &url,
+                &json!({"type": "resolve", "comment_id": comment_id, "resolved": true}),
+                token,
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap_or_else(|err| die(err));
+            if status != 200 {
+                die(format!(
+                    "could not resolve a seeded annotation on {slug} ({status}): {}",
+                    detail_of(&resolved)
+                ));
+            }
+        }
+        placed += 1;
+    }
+    (placed, missed)
+}
+
+/// Where a seeded annotation's passage sits in the document's visible text,
+/// and the context stored either side of it. A region annotation is anchored
+/// to the image instead and needs no passage; anything else whose passage is
+/// not in the document cannot be placed.
+pub struct SeedAnchor {
+    pub prefix: String,
+    pub suffix: String,
+    pub position: Option<i64>,
+}
+
+pub fn anchor(item: &SeedAnnotation, text: &str) -> Option<SeedAnchor> {
+    if item.region.is_some() {
+        return Some(SeedAnchor {
+            prefix: String::new(),
+            suffix: String::new(),
+            position: None,
+        });
+    }
+    let at = text.find(item.exact)?;
+    let context = Configuration::default().caps.context;
+    Some(SeedAnchor {
+        prefix: tail(&text[..at], context),
+        suffix: head(&text[at + item.exact.len()..], context),
+        position: Some(at as i64),
+    })
+}
+
+/// Writes one document's annotations, anchoring each to where its passage
+/// actually appears.
+pub async fn seed_annotations(
+    room: &Room,
+    annotations: &[SeedAnnotation],
+    text: &str,
+) -> (usize, usize) {
+    let (mut placed, mut missed) = (0, 0);
+    for item in annotations {
+        let Some(spot) = anchor(item, text) else {
+            missed += 1;
+            continue;
+        };
+        let mut written = Comment {
+            id: new_id(),
+            motivation: item.motivation.into(),
+            exact: item.exact.into(),
+            prefix: spot.prefix,
+            suffix: spot.suffix,
+            position: spot.position,
+            region: item.region.clone(),
+            body: item.body.into(),
+            tags: item.tags.iter().map(|t| t.to_string()).collect(),
+            creator: item.creator.into(),
+            created: timestamp(),
+            ..Comment::default()
+        };
+        if item.resolved {
+            written.resolved = true;
+            written.resolved_at = Some(timestamp());
+        }
+        for answer in &item.replies {
+            written.replies.push(Reply {
+                id: new_id(),
+                body: answer.to_string(),
+                creator: "Reviewer".into(),
+                created: timestamp(),
+                author: String::new(),
+            });
+        }
+        let mut state = room.state.lock().await;
+        state.seq += 1;
+        written.seq = state.seq;
+        state.comments.push(written);
+        if let Err(err) = room.save(&state).await {
+            die(format!(
+                "could not write the seeded comments for {}: {err}",
+                room.slug
+            ));
+        }
+        placed += 1;
+    }
+    (placed, missed)
+}
+
+/// What the reader would anchor against: the document with its markup,
+/// scripts and styles removed. An approximation of what a browser shows,
+/// which is enough to locate a phrase and take its surroundings. All
+/// whitespace collapses, newlines included: a browser renders a line break
+/// inside a paragraph as a single space.
+pub fn visible_text(document: &str) -> String {
+    let script_or_style =
+        regex::Regex::new(r"(?is)<(script|style)\b[^>]*>.*?</(script|style)>").expect("pattern");
+    let tag = regex::Regex::new(r"(?s)<[^>]*>").expect("pattern");
+    let space = regex::Regex::new(r"\s+").expect("pattern");
+    let text = script_or_style.replace_all(document, " ");
+    let text = tag.replace_all(&text, "");
+    let text = html_escape::decode_html_entities(&text);
+    space.replace_all(&text, " ").to_string()
+}
+
+fn head(text: &str, n: usize) -> String {
+    if text.len() <= n {
+        return text.to_string();
+    }
+    let mut end = n;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_string()
+}
+
+fn tail(text: &str, n: usize) -> String {
+    if text.len() <= n {
+        return text.to_string();
+    }
+    let mut start = text.len() - n;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    text[start..].to_string()
+}
