@@ -26,6 +26,7 @@
     tone = null,
     size = null,
     colour = null,
+    filled = false,
     onclick,
   } = $props();
 
@@ -46,7 +47,7 @@
     {#snippet element(attributes)}
       {#if href}
         <a {...attributes} {href} class={classes} aria-label={label} role="button">
-          <Icon name={icon} />
+          <Icon name={icon} {filled} />
         </a>
       {:else}
         <button
@@ -58,7 +59,7 @@
           {disabled}
           {onclick}
         >
-          <Icon name={icon} />
+          <Icon name={icon} {filled} />
         </button>
       {/if}
     {/snippet}

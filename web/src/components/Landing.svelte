@@ -417,7 +417,8 @@
                       icon="star"
                       tone="plain"
                       size="btn-icon-sm"
-                      colour={favorites.has(doc.slug) ? "text-tertiary-500" : "text-surface-400-600"}
+                      colour={favorites.has(doc.slug) ? "text-tertiary-600" : "text-surface-400-600"}
+                      filled={favorites.has(doc.slug)}
                       pressed={favorites.has(doc.slug)}
                       label={favorites.has(doc.slug) ? "Remove from favorites" : "Add to favorites"}
                       onclick={() => star(doc.slug)}

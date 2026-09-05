@@ -61,14 +61,18 @@
 
   // Skeleton's button sizes the icon inside it, so the default here is only
   // for an icon that stands on its own.
-  let { name, size = null } = $props();
+  //
+  // A few of these say whether something is on -- a star is either a favourite
+  // or it is not -- and an outline that only changes colour reads as a click
+  // that did not register. Those are drawn solid instead.
+  let { name, size = null, filled = false } = $props();
 </script>
 
 <svg
   viewBox="0 0 24 24"
   width={size}
   height={size}
-  fill="none"
+  fill={filled ? "currentColor" : "none"}
   stroke="currentColor"
   stroke-width="2"
   stroke-linecap="round"
