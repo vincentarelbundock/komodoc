@@ -1,6 +1,7 @@
 # SPEC: komodoc in Rust
 
-Status: proposed, not started. Nothing in this document is built. The current
+Status: done. The port landed in one commit on `live-markdown-editor`; what
+was actually built differs from the plan below in three ways, noted at the end.
 Go implementation on `live-markdown-editor` is complete and tested, and lands
 first; the port begins on a fresh branch after it.
 
@@ -346,3 +347,36 @@ must be trusted on faith.
 - Two crates, not one and not five.
 - The Go code is deleted at the end of step 11, not kept "for reference".
   Git has it.
+
+## What was built
+
+The port landed in one commit rather than the eleven steps above, and three
+decisions came out differently once the code existed.
+
+**Cloudflare went, rather than staying untouched.** The plan kept the Worker
+and left the server-versus-Worker duplication in place. The instruction was to
+drop it, and dropping it is what made the rest simple: there is no longer a
+second implementation of the rules to keep in step, so `conformance.json` and
+its runner went too. What replaced them is that the rules now exist once, in
+`config.rs` and the handlers, and the ported test suite is what holds them.
+
+**The engine is one crate with two features, not one module set.** `engine`
+builds to `markdown.wasm` (378 KB) and `typst.wasm` (31 MB) from the same
+source, selected by feature, and natively into the binary. The raw C ABI in
+`abi.rs` is shared: both modules export `alloc`, `dealloc`, `compile`,
+`title_of`, `set_today`, `output_ptr` and `ok`, so `editor.js` loads either one
+with the same forty lines and `typst.js` was deleted.
+
+**The typst binary dependency is gone.** The plan had `publish` shelling out
+until step 9; in the event the native engine was there from the start, so
+`komodoc publish paper.typ` compiles in-process. `typst-kit`, system fonts and
+package resolution are not wired up yet -- the world reads files from the
+document's own directory and refuses anything above it, which is what the
+existing examples need.
+
+Not built, and still worth doing: the file map is a directory reader rather
+than a host-supplied map, so browser-side imports and `#bibliography` do not
+work yet; packages are not resolved anywhere; `yrs` is not in the server, so
+the room still relays Yjs updates it cannot read and a session still ends when
+the last editor leaves; fonts are still shipped whole. The browser track
+(CodeMirror, Bun, TypeScript) is untouched.
