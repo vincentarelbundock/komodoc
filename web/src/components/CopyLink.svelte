@@ -1,10 +1,10 @@
 <script>
-  import Icon from "./Icon.svelte";
+  import IconButton from "./IconButton.svelte";
 
   // The address bar already holds the link; the button spares the reader from
   // selecting it. The icon turns into a tick for a moment, since a copy is
   // otherwise invisible.
-  let { href = null, label = "Copy link", classes = "outline iconbtn" } = $props();
+  let { href = null, label = "Copy link" } = $props();
   let done = $state(false);
   let timer;
 
@@ -20,7 +20,9 @@
   }
 </script>
 
-<button type="button" class="{classes}{done ? ' done' : ''}" onclick={copy}
-        aria-label={label} title={label}>
-  <Icon name={done ? "check" : "link"} />
-</button>
+<IconButton
+  icon={done ? "check" : "link"}
+  {label}
+  tone={done ? "outline done" : "outline"}
+  onclick={copy}
+/>

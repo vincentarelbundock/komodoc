@@ -11,7 +11,8 @@
   import { PANES, clamp, rememberWidth, storedWidth } from "../lib/panes.js";
 
   import Nav from "./Nav.svelte";
-  import Icon from "./Icon.svelte";
+  import IconButton from "./IconButton.svelte";
+  import ControlGroup from "./ControlGroup.svelte";
   import CopyLink from "./CopyLink.svelte";
   import Preview from "./Preview.svelte";
   import Grip from "./Grip.svelte";
@@ -687,36 +688,27 @@
       <!-- Which panes are showing. A group of its own, separate from the
            annotation tools: these change what you are looking at, not what a
            selection would become. -->
-      <div class="panes" role="group" aria-label="Panes">
-        {#if editing}
-          <button type="button" class="pane outline iconbtn" aria-pressed={showing.source}
-                  aria-label="Show or hide the source" title="Source" onclick={() => togglePane("source")}>
-            <Icon name="panel-left" />
-          </button>
-        {/if}
-        <button type="button" class="pane outline iconbtn" aria-pressed={showing.preview}
-                aria-label="Show or hide the document" title="Document" onclick={() => togglePane("preview")}>
-          <Icon name="file-text" />
-        </button>
-        <button type="button" class="pane outline iconbtn" aria-pressed={showing.comments}
-                aria-label="Show or hide the comments" title="Comments" onclick={() => togglePane("comments")}>
-          <Icon name="panel-right" />
-        </button>
-        {#if editing}
-          <!-- Locked, a click in either the source or the document takes the
-               other one to the same place. -->
-          <button type="button" class="pane outline iconbtn" aria-pressed={linked}
-                  aria-label="Keep the source and the document in step" title="Keep in step"
-                  onclick={() => setLinked(!linked)}>
-            <Icon name="lock" />
-          </button>
-        {/if}
-      </div>
+      <ControlGroup label="Panes">
+        {#snippet children()}
+          {#if editing}
+            <IconButton icon="panel-left" label="Show or hide the source" title="Source"
+                        pressed={showing.source} onclick={() => togglePane("source")} />
+          {/if}
+          <IconButton icon="file-text" label="Show or hide the document" title="Document"
+                      pressed={showing.preview} onclick={() => togglePane("preview")} />
+          <IconButton icon="panel-right" label="Show or hide the comments" title="Comments"
+                      pressed={showing.comments} onclick={() => togglePane("comments")} />
+          {#if editing}
+            <!-- Locked, a click in either the source or the document takes the
+                 other one to the same place. -->
+            <IconButton icon="lock" label="Keep the source and the document in step"
+                        title="Keep in step" pressed={linked} onclick={() => setLinked(!linked)} />
+          {/if}
+        {/snippet}
+      </ControlGroup>
       {#if editing}
-        <button type="button" class="iconbtn" aria-label="Save a new version" title="Save"
-                disabled={!dirty} onclick={save}>
-          <Icon name="save" />
-        </button>
+        <IconButton icon="save" label="Save a new version" title="Save"
+                    tone="primary" disabled={!dirty} onclick={save} />
         <!-- Said only when there is more than one person editing. -->
         {#if peers > 1}<small class="editstate peers">{peers} editing</small>{/if}
         {#if state}<small class="editstate" class:problem>{state}</small>{/if}

@@ -7,9 +7,24 @@
 import { defineConfig } from "vite";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { resolve } from "node:path";
+import { rmSync } from "node:fs";
+
+// What this build owns in the output directory, and clears before it writes.
+// The directory is shared -- the renderers and the README are put there by
+// other parts of the build -- so it cannot simply be emptied; but leaving what
+// this build wrote last time means a stale bundle is embedded in the binary
+// alongside the fresh one, and a rule from a page that no longer exists still
+// applies to the pages that do.
+const clearOwnOutput = {
+  name: "komodoc-clear-own-output",
+  buildStart() {
+    const out = resolve(import.meta.dirname, "../src/shell");
+    rmSync(resolve(out, "assets"), { recursive: true, force: true });
+  },
+};
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [clearOwnOutput, svelte()],
   // The pages are served from the site root by the Go-free Rust server, which
   // knows nothing about this build beyond where the files are.
   base: "/",

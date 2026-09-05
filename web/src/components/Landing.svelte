@@ -343,7 +343,7 @@
                 {({ markdown: ".md", typst: ".typ" })[doc.source_format] || ".html"}
               </small>
               <CopyLink href={new URL(`/docs/${doc.slug}`, location.origin).href}
-                        label="Copy the link to {doc.title}" classes="iconbtn linkcopy" />
+                        label="Copy the link to {doc.title}" />
             </td>
             <td>{counts.has(doc.slug) ? counts.get(doc.slug) : "—"}</td>
             <td>{doc.updated_at.slice(0, 10)}</td>

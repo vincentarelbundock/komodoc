@@ -111,13 +111,9 @@ body > nav {
   width: 1.5rem;
 }
 
-/* Every item on the bar centres on the same line. The brand contains an SVG
-   and the title is bare text, so without this they sit on different baselines.
-   A long document name truncates rather than pushing the bar around. */
+/* A long document name truncates rather than pushing the bar around. Where
+   the items sit on the line is Nav.svelte's own business. */
 body > nav li {
-  display: flex;
-  align-items: center;
-  min-width: 0;
 }
 /* Quiet, not alarming: nothing is lost while it is showing. */
 #conn {
@@ -712,9 +708,10 @@ footer.grid > [role="button"] {
    tool row carries. They lose a little of their padding rather than the last
    of them scrolling out of sight. */
 @media (max-width: 400px) {
-  .tools .tool,
-  .navtools .iconbtn {
-    min-width: 2rem;
+  body > nav {
+    --komodoc-control: 1.75rem;
+  }
+  .tools .tool {
     padding: 0.25rem;
   }
   .navtools {
@@ -885,32 +882,21 @@ footer.grid > [role="button"] {
   display: flex;
   gap: 0.25rem;
 }
-/* The tool row and the icons beside it are one row of equal squares, so they
-   are sized by one rule rather than two that have to be kept in step. */
-.tools .tool,
-.navtools .iconbtn {
-  min-width: 2.25rem;
+/* The annotation tools are the same square as the controls on the bar. The
+   size is one variable, so a row of them cannot drift from a row of those. */
+.tools .tool {
+  min-width: var(--komodoc-control, 2rem);
+  height: var(--komodoc-control, 2rem);
   padding: 0.3rem;
   display: inline-grid;
   place-items: center;
   line-height: 1;
 }
-.tools svg,
-.navtools .iconbtn svg {
-  width: 1.05rem;
-  height: 1.05rem;
-  display: block;
-}
 
-/* An icon that acts on the document rather than making an annotation stands a
-   little apart from the tools, on the same line and at the same size. */
+/* The controls stand a little apart from the panes beside them: one group is
+   what you are looking at, the other is what you can do to it. */
 .navtools {
   gap: 0.75rem;
-}
-/* Copying leaves nothing visible behind, so the icon itself is the receipt. */
-.iconbtn.done {
-  color: var(--pico-ins-color);
-  border-color: var(--pico-ins-color);
 }
 
 /* A label on an annotation, and the same shape in the filter row above the
@@ -1000,26 +986,6 @@ footer.grid > [role="button"] {
 }
 
 /* The middle group sits between the two the flex row pushes apart. */
-nav > ul.navmid {
-  margin: 0 auto;
-  flex: 0 0 auto;
-}
-nav > ul.navmid a {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  color: var(--pico-muted-color);
-  white-space: nowrap;
-}
-nav > ul.navmid a:hover,
-nav > ul.navmid a[aria-current="page"] {
-  color: var(--pico-primary);
-}
-nav > ul.navmid svg {
-  width: 1.05rem;
-  height: 1.05rem;
-  display: block;
-}
 
 /* The README is reference material with tables and code in it, not an essay:
    it wants the width of the page, not a narrow measure. */

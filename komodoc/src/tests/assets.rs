@@ -7,6 +7,18 @@ fn shell() -> std::collections::HashMap<String, crate::assets::ShellFile> {
     load_shell(&Configuration::default()).expect("the shell loads")
 }
 
+/// Every rule the pages are styled by. A component styles itself and the
+/// bundler splits those styles across as many sheets as it likes, so a test
+/// that asked for "the stylesheet" would be asking about whichever one came
+/// back first.
+fn stylesheets() -> String {
+    shell()
+        .iter()
+        .filter(|(route, _)| route.starts_with("/assets/") && route.ends_with(".css"))
+        .map(|(_, asset)| asset.text())
+        .collect()
+}
+
 // Every page the server can answer with is in the build. A missing one is not
 // a missing feature but a blank window, and the build is a bundler's output
 // rather than a list kept by hand, so this is where a page that stopped being
@@ -80,11 +92,7 @@ fn bundles_are_immutable_and_pages_are_not() {
 #[test]
 fn the_wordmark_font_is_served_from_here() {
     let shell = shell();
-    let css = shell
-        .iter()
-        .find(|(route, _)| route.starts_with("/assets/") && route.ends_with(".css"))
-        .map(|(_, asset)| asset.text())
-        .expect("the stylesheet is in the build");
+    let css = stylesheets();
     assert!(
         css.contains("/fonts/ibm-plex-sans-600.woff2"),
         "the stylesheet does not point at the font route"
@@ -243,13 +251,31 @@ fn no_page_mounts_itself_into_a_wrapper() {
     }
     // And the rule that depends on it is still written that way, so this test
     // keeps meaning what it says.
-    let css = shell
-        .iter()
-        .find(|(route, _)| route.starts_with("/assets/") && route.ends_with(".css"))
-        .map(|(_, asset)| asset.text())
-        .expect("the stylesheet is in the build");
+    let css = stylesheets();
     assert!(
         css.contains("body>nav") || css.contains("body > nav"),
         "the bar is no longer sized as body > nav"
+    );
+}
+
+// Every icon control is one component, so they are one square with the icon at
+// one size. The alternative -- a string of classes at each call site, sized by
+// a rule keyed to whichever ancestor that control happens to have -- is what
+// had the bar's buttons sitting on three different lines with four different
+// icon sizes, and no single rule was wrong about any of it.
+#[test]
+fn one_component_draws_every_icon_control() {
+    let css = stylesheets();
+    for orphan in [".navtools .iconbtn", "ul.navmid svg"] {
+        assert!(
+            !css.contains(orphan),
+            "{orphan} sizes a control from outside the component that draws it"
+        );
+    }
+
+    // And the box every one of them shares comes from one variable.
+    assert!(
+        css.contains("--komodoc-control"),
+        "no control size in the bundles; the buttons are sized somewhere else again"
     );
 }
