@@ -154,6 +154,10 @@ main.reader {
   max-width: none;
   padding: 0;
   margin: 0;
+  /* Each pane scrolls inside itself, so nothing it cannot fit is allowed to
+     push the row past the window: a document that scrolled the page would take
+     the navigation and the comment column with it. */
+  overflow: hidden;
 }
 .editorpane {
   flex: 0 0 var(--komodoc-editor);
@@ -196,22 +200,109 @@ main.reader.editing:not(.no-preview) #editorGrip {
 .editorpane {
   padding: 0;
   min-width: 0;
+  /* min-height: 0 is what lets a grid item be shorter than its contents, which
+     is what makes the editor scroll rather than the page. */
+  min-height: 0;
   display: grid;
   border-right: 1px solid var(--pico-muted-border-color);
 }
-#editorSource {
-  margin: 0;
-  border: 0;
-  border-radius: 0;
-  resize: none;
+
+/* ---------------------------------------------------------------- the source
+ *
+ * CodeMirror brings its own layout and no opinion about how it should look, so
+ * this is where it is dressed as part of the application: the same monospace
+ * the rest of the shell uses, on the page's own background, with the chrome an
+ * editor needs and nothing else.
+ */
+.editorhost {
+  min-height: 0;
+  display: grid;
+}
+.cm-editor {
   height: 100%;
+  min-height: 0;
+  background: var(--pico-background-color);
+  color: var(--pico-color);
   font-family: var(--pico-font-family-monospace, ui-monospace, monospace);
   font-size: 0.9rem;
   line-height: 1.6;
-  background: var(--pico-background-color);
 }
-#editorSource:focus {
-  box-shadow: none;
+/* The pane already has a border and the focus ring belongs to the window, not
+   to a column that fills it. */
+.cm-editor.cm-focused {
+  outline: none;
+}
+/* The scroller is the editor's own scrolling box: this is the pane that
+   scrolls, and it is why the window does not. */
+.cm-editor .cm-scroller {
+  overflow: auto;
+  font-family: inherit;
+  line-height: inherit;
+}
+.cm-editor .cm-content {
+  padding: var(--pico-spacing) 0;
+  caret-color: var(--pico-primary);
+}
+/* Line numbers are furniture: present, and quieter than the text. */
+.cm-editor .cm-gutters {
+  background: var(--pico-background-color);
+  border-right: 1px solid var(--pico-muted-border-color);
+  color: var(--pico-muted-color);
+}
+.cm-editor .cm-activeLineGutter,
+.cm-editor .cm-activeLine {
+  background: color-mix(in srgb, var(--komodoc-sage) 12%, transparent);
+}
+.cm-editor .cm-selectionBackground,
+.cm-editor.cm-focused .cm-selectionBackground,
+.cm-editor .cm-content ::selection {
+  background: color-mix(in srgb, var(--komodoc-sage) 40%, transparent);
+}
+.cm-editor .cm-searchMatch {
+  background: color-mix(in srgb, var(--komodoc-sage) 35%, transparent);
+}
+.cm-editor .cm-panels {
+  background: var(--pico-card-background-color);
+  color: var(--pico-color);
+  border-color: var(--pico-muted-border-color);
+}
+
+/* Somebody else's caret, and their name beside it.
+ *
+ * y-codemirror draws the caret in the colour that person picked when they
+ * joined and leaves the shape of it to the page. The label sits above the
+ * line rather than in it, so nobody's name pushes anyone's text around, and it
+ * fades unless the pointer is near: a name at every caret is a distraction
+ * once you know who is here. */
+.cm-ySelectionCaret {
+  position: relative;
+  border-left: 2px solid;
+  border-right: none;
+  margin-left: -1px;
+  box-sizing: border-box;
+}
+.cm-ySelectionCaretDot {
+  display: none;
+}
+.cm-ySelectionInfo {
+  position: absolute;
+  top: -1.4em;
+  left: -2px;
+  padding: 0 0.35em;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  font-family: var(--pico-font-family);
+  color: #fff;
+  white-space: nowrap;
+  border-radius: 3px;
+  opacity: 0.85;
+  transition: opacity 0.2s;
+  user-select: none;
+  pointer-events: none;
+  z-index: 5;
+}
+.cm-ySelectionCaret:hover .cm-ySelectionInfo {
+  opacity: 1;
 }
 /* Says what the editor is doing, beside the button that does it. */
 .editstate {

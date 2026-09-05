@@ -10,9 +10,17 @@ import Nav from "./components/Nav.svelte";
 import Hero from "./components/Hero.svelte";
 import { me as whoami } from "./lib/api.js";
 
-const nav = mount(Nav, { target: document.getElementById("nav"), props: { me: {} } });
 mount(Hero, { target: document.getElementById("hero") });
-whoami().then((me) => nav.$set?.({ me }));
+// The bar goes before the page's own markup, so it is the body's first child
+// and the stylesheet's `body > nav` rules apply to it as they do everywhere
+// else. Who you are is waited for rather than filled in afterwards: the prose
+// is already on the screen, and a bar that changes shape a moment after it
+// appears is worse than one that arrives complete.
+mount(Nav, {
+  target: document.body,
+  anchor: document.querySelector("main"),
+  props: { me: await whoami() },
+});
 
 /* ---------------------------------------------------------------- images */
 

@@ -220,3 +220,36 @@ fn storable_source_formats() {
         );
     }
 }
+
+// The bar is the body's first child on every page, because the stylesheet
+// addresses it as `body > nav` -- its height among other things, which the
+// reader's panes are sized against. A page that mounted itself into a wrapper
+// would put an element in between, and every one of those rules would quietly
+// stop matching: a layout that looks nearly right, scrolls the whole window
+// instead of its panes, and says nothing about why.
+#[test]
+fn no_page_mounts_itself_into_a_wrapper() {
+    let shell = shell();
+    let wrapper = regex::Regex::new(r#"<div id="(app|nav)""#).expect("a constant pattern");
+    for (route, asset) in &shell {
+        if !route.ends_with(".html") {
+            continue;
+        }
+        let page = asset.text();
+        assert!(
+            !wrapper.is_match(&page),
+            "{route} mounts into a wrapper element"
+        );
+    }
+    // And the rule that depends on it is still written that way, so this test
+    // keeps meaning what it says.
+    let css = shell
+        .iter()
+        .find(|(route, _)| route.starts_with("/assets/") && route.ends_with(".css"))
+        .map(|(_, asset)| asset.text())
+        .expect("the stylesheet is in the build");
+    assert!(
+        css.contains("body>nav") || css.contains("body > nav"),
+        "the bar is no longer sized as body > nav"
+    );
+}
