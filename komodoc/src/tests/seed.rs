@@ -246,3 +246,42 @@ async fn seeding_leaves_no_room_locks_behind() {
         "a fresh server found the seeded room read-only"
     );
 }
+
+// The editable examples are what the editor is demonstrated on, and they are
+// written as continuous paragraphs rather than wrapped at some column: the
+// editor soft-wraps, so a source with newlines poured through it re-flows
+// twice and reads as ragged. Hard wrapping also makes every edit to a
+// paragraph a change to several lines, which is what a reader sees in a
+// shared session.
+#[test]
+fn the_editable_examples_are_not_hard_wrapped() {
+    // A line long enough that no editor was going to break it there anyway,
+    // and short enough that a real wrap column (72, 80, 100) is well under it.
+    const WRAPPED_AT_MOST: usize = 140;
+    let mut checked = 0;
+    for document in seed_documents() {
+        if !crate::render::is_markdown(&document.file) && !crate::render::is_typst(&document.file) {
+            continue;
+        }
+        let Ok(source) = std::fs::read_to_string(example_path(&document.file)) else {
+            continue;
+        };
+        checked += 1;
+        // Prose only: a heading, a maths block or a table row is as long as it
+        // is, and none of them is a paragraph somebody wrapped.
+        let paragraphs = source
+            .lines()
+            .filter(|line| !line.trim_start().starts_with(['#', '=', '$', '|', '<']))
+            .filter(|line| line.trim().len() > 40);
+        let longest = paragraphs.clone().map(str::len).max().unwrap_or(0);
+        assert!(
+            longest > WRAPPED_AT_MOST,
+            "{} looks wrapped: its longest paragraph line is {longest} characters. \
+             Write paragraphs as one line and let the editor wrap them.",
+            document.file
+        );
+    }
+    if checked == 0 {
+        eprintln!("no examples built; run `make examples`");
+    }
+}
