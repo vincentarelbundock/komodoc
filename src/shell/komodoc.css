@@ -142,15 +142,85 @@ body > nav [role="button"] {
 /* ------------------------------------------------------------------ reader */
 
 main.reader {
-  /* The sidebar's width is a variable so the grip between the panes can move
-     it, clamped so neither pane can be squeezed out of existence. */
+  /* Each pane's width is a variable so the separator beside it can move it,
+     clamped so nothing can be squeezed out of existence. */
   --komodoc-sidebar: 360px;
+  --komodoc-editor: 480px;
   height: calc(100dvh - var(--komodoc-bar));
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 6px var(--komodoc-sidebar);
+  /* Flex rather than a grid of named columns: any pane can be folded away, and
+     a row that simply has one fewer item needs no template for each of the
+     arrangements that produces. */
+  display: flex;
   max-width: none;
   padding: 0;
   margin: 0;
+}
+.editorpane {
+  flex: 0 0 var(--komodoc-editor);
+}
+.viewport {
+  flex: 1 1 auto;
+}
+.sidebar {
+  flex: 0 0 var(--komodoc-sidebar);
+}
+.grip {
+  flex: 0 0 6px;
+}
+/* Whatever is left when the document is not showing takes the room it would
+   have had: the source if it is there, the comments otherwise. */
+main.reader.no-preview .editorpane,
+main.reader.no-preview:not(.editing) .sidebar {
+  flex: 1 1 auto;
+}
+
+/* A pane that is folded away is display:none, not merely narrow: it keeps its
+   contents, so unfolding it is instant, but it takes no room and the flex row
+   closes over it.
+
+   A separator only exists between two panes that are both showing. The source
+   is separated from the document; the comments from whatever is to their left.
+   With the document folded away, one separator is enough, and it is the one
+   that sizes the comments. */
+main.reader:not(.editing) .editorpane,
+main.reader.no-preview .viewport,
+main.reader.no-comments .sidebar,
+#editorGrip,
+main.reader.no-comments #grip,
+main.reader.no-preview:not(.editing) #grip {
+  display: none;
+}
+main.reader.editing:not(.no-preview) #editorGrip {
+  display: block;
+}
+.editorpane {
+  padding: 0;
+  min-width: 0;
+  display: grid;
+  border-right: 1px solid var(--pico-muted-border-color);
+}
+#editorSource {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  resize: none;
+  height: 100%;
+  font-family: var(--pico-font-family-monospace, ui-monospace, monospace);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  background: var(--pico-background-color);
+}
+#editorSource:focus {
+  box-shadow: none;
+}
+/* Says what the editor is doing, beside the button that does it. */
+.editstate {
+  white-space: nowrap;
+  color: var(--pico-muted-color);
+  font-size: 0.8em;
+}
+.editstate.problem {
+  color: var(--pico-del-color, #b3261e);
 }
 
 /* The handle between the document and the comments. */
@@ -203,7 +273,7 @@ main.reader {
 }
 .sidebar {
   overflow: auto;
-  padding: var(--pico-spacing);
+  padding: 0 var(--pico-spacing) var(--pico-spacing);
   border-left: 1px solid var(--pico-muted-border-color);
 }
 /* Pico gives articles generous margins; a list of them needs less. */
@@ -225,6 +295,24 @@ main.reader {
 }
 .resolved {
   opacity: 0.6;
+}
+/* Settled business, kept to one line: everything but the summary is folded
+   away, and a click on the card puts it back. */
+.summary {
+  display: none;
+}
+.sidebar article.collapsed {
+  padding: 0.25rem calc(var(--pico-spacing) * 0.6);
+}
+.sidebar article.collapsed > :not(.summary) {
+  display: none;
+}
+.sidebar article.collapsed .summary {
+  display: block;
+  font-size: 0.85em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The bar that appears over a selection, positioned from JavaScript. */
@@ -778,17 +866,8 @@ footer.grid > [role="button"] {
 .tools .tool[data-tool="commenting"] {
   --komodoc-tint: hsl(42 55% 45%);
 }
-.tools .tool[data-tool="questioning"] {
-  --komodoc-tint: hsl(255 30% 50%);
-}
 .tools .tool[data-tool="highlighting"] {
   --komodoc-tint: hsl(145 28% 38%);
-}
-.tools .tool[data-tool="editing"] {
-  --komodoc-tint: hsl(8 45% 48%);
-}
-.tools .tool[data-tool="assessing"] {
-  --komodoc-tint: hsl(195 35% 40%);
 }
 .tools .tool[data-tool="region"] {
   --komodoc-tint: hsl(42 55% 45%); /* a region is a comment on a figure */
@@ -802,24 +881,9 @@ footer.grid > [role="button"] {
   border-color: hsl(42 55% 45%);
   color: #fff;
 }
-.tools .tool[data-tool="questioning"][aria-pressed="true"] {
-  background: hsl(255 30% 50%);
-  border-color: hsl(255 30% 50%);
-  color: #fff;
-}
 .tools .tool[data-tool="highlighting"][aria-pressed="true"] {
   background: hsl(145 28% 38%);
   border-color: hsl(145 28% 38%);
-  color: #fff;
-}
-.tools .tool[data-tool="editing"][aria-pressed="true"] {
-  background: hsl(8 45% 48%);
-  border-color: hsl(8 45% 48%);
-  color: #fff;
-}
-.tools .tool[data-tool="assessing"][aria-pressed="true"] {
-  background: hsl(195 35% 40%);
-  border-color: hsl(195 35% 40%);
   color: #fff;
 }
 .tools .tool[data-tool="region"][aria-pressed="true"] {
@@ -833,21 +897,9 @@ footer.grid > [role="button"] {
   background: hsl(42 55% 90%);
   color: hsl(42 55% 28%);
 }
-.sidebar mark[data-motivation="questioning"] {
-  background: hsl(255 30% 90%);
-  color: hsl(255 30% 34%);
-}
 .sidebar mark[data-motivation="highlighting"] {
   background: hsl(145 28% 90%);
   color: hsl(145 28% 25%);
-}
-.sidebar mark[data-motivation="editing"] {
-  background: hsl(8 45% 90%);
-  color: hsl(8 45% 30%);
-}
-.sidebar mark[data-motivation="assessing"] {
-  background: hsl(195 35% 90%);
-  color: hsl(195 35% 26%);
 }
 
 /* ---------------------------------------------------------- documentation */
@@ -1113,4 +1165,72 @@ nav > ul.navmid svg {
   align-items: center;
   justify-content: center;
   margin-top: 2rem;
+}
+
+/* The format a document was published from, beside its title in the list.
+   Quiet: it matters when you are looking for something to edit, and not
+   otherwise. */
+.kind {
+  color: var(--pico-muted-color);
+  font-size: 0.75em;
+  font-family: var(--pico-font-family-monospace, ui-monospace, monospace);
+  flex: none;
+}
+
+/* The pane toggles: a group of their own, beside the annotation tools but not
+   part of them. These change what is on the screen; the tools change what a
+   selection would become. */
+.panes {
+  display: inline-flex;
+  gap: 0.2rem;
+  margin-right: 0.35rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid var(--pico-muted-border-color);
+}
+/* A pressed toggle is a pane that is showing, and reads as switched on rather
+   than as merely hovered. */
+.panes .pane[aria-pressed="true"] {
+  background: var(--pico-primary);
+  border-color: var(--pico-primary);
+  color: var(--pico-primary-inverse);
+}
+
+/* How many people are editing, said only when it is more than one. */
+.peers {
+  color: var(--pico-primary);
+}
+
+/* The annotation tools, at the top of the pane the comments they make land in,
+   and staying there while it scrolls. They name themselves: three tools with
+   room for their names reads better than six icons that need learning. */
+.sidebar .tools {
+  position: sticky;
+  top: 0;
+  /* Above the cards, which pass underneath it rather than over it. */
+  z-index: 5;
+  display: flex;
+  gap: 0.35rem;
+  /* Flush with the top and both edges of the pane: a gap above it is a strip
+     of comments scrolling past where nothing should be showing. */
+  margin: 0 calc(var(--pico-spacing) * -1) var(--pico-spacing);
+  padding: 0.6rem var(--pico-spacing);
+  /* Opaque: it is what the comments go behind. */
+  background: var(--pico-background-color);
+  border-bottom: 1px solid var(--pico-muted-border-color);
+}
+.sidebar .tools .tool {
+  flex: 1;
+  width: auto;
+  margin: 0;
+  padding: 0.4rem 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+.sidebar .tools .tool svg {
+  width: 1rem;
+  height: 1rem;
+  flex: none;
 }

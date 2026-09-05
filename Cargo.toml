@@ -1,0 +1,21 @@
+# Komodoc: two crates. `engine` renders markdown and typst, natively and as
+# WebAssembly; `komodoc` is the binary -- the command line and the server.
+[workspace]
+resolver = "2"
+members = ["engine", "komodoc"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = true
+codegen-units = 4
+
+# The browser modules are built with this profile: as small as they can be,
+# because one of them is fetched by every editor and the other is thirty
+# megabytes before compression.
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

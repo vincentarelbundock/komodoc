@@ -281,6 +281,17 @@
         link.href = `/docs/${doc.slug}`;
         link.textContent = doc.title;
 
+        // What the document is written in. A document that kept its source
+        // opens in the editor rather than only in the reader, and saying so
+        // in the list is how you know which of yours can still be worked on.
+        const kind = document.createElement("small");
+        kind.className = "kind";
+        const suffix = { markdown: ".md", typst: ".typ" }[doc.source_format];
+        kind.textContent = suffix || ".html";
+        kind.title = suffix
+          ? `Published from ${doc.source_format}, and editable`
+          : "HTML: published as it is, and read-only here";
+
         // Passing a document on means sending its link, and the row is where
         // the reader is already looking. The icon becomes a tick for a moment,
         // since a copy leaves nothing else behind.
@@ -307,7 +318,7 @@
 
         const title = document.createElement("td");
         title.className = "titlecell";
-        title.append(link, copy);
+        title.append(link, kind, copy);
 
         const comments = document.createElement("td");
         // Counts are fetched once per showList(), not per row, so a redraw

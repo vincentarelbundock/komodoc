@@ -1,0 +1,1 @@
+- Bring your own storage. One server runs on a VPS, everything is run client slide. People supply a S3 or R2 token.

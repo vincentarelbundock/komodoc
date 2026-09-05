@@ -1,0 +1,40 @@
+# The rendering engine: markdown and typst, to the page every Komodoc document
+# is stored as.
+#
+# One crate, built twice. Natively it is what `komodoc publish` and `komodoc
+# seed` render with; compiled to WebAssembly it is what the editor previews
+# with, in the browser. The same code in both places is what makes the preview
+# the document a save stores, byte for byte.
+#
+# Each renderer is a feature, so the browser gets two small modules rather than
+# one large one: markdown.wasm is a few hundred kilobytes and travels with the
+# shell; typst.wasm is thirty megabytes of compiler and fonts and is fetched
+# only by someone who opens a typst document to edit. The host enables both.
+[package]
+name = "komodoc-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = ["markdown", "typst"]
+markdown = ["dep:comrak"]
+typst = ["dep:typst", "dep:typst-html", "dep:typst-assets", "dep:ecow"]
+
+[dependencies]
+# CommonMark plus the GitHub extensions: tables, strikethrough, task lists,
+# autolinks, footnotes. What goldmark rendered before the port.
+comrak = { version = "0.54", default-features = false, optional = true }
+# Pinned together: the editor and whatever renders a typst document elsewhere
+# must be the same compiler, or the same source renders two ways.
+typst = { version = "=0.15.1", optional = true }
+typst-html = { version = "=0.15.1", optional = true }
+# Typst's own default fonts, embedded, so a document compiles here exactly as
+# it does under the typst binary: the same faces, and the maths font without
+# which maths does not compile at all.
+typst-assets = { version = "=0.15.1", features = ["fonts"], optional = true }
+# Diagnostics come back from typst in its own vector type.
+ecow = { version = "0.2", optional = true }

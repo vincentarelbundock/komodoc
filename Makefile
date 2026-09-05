@@ -1,6 +1,8 @@
 # Komodoc. `make` builds the single static binary into dist/.
 #
-# Everything runs through the Go toolchain.
+# Everything runs through cargo: two crates, one workspace. The engine renders
+# markdown and typst, natively for the command line and as WebAssembly for the
+# editor; komodoc is the binary.
 
 # Local settings, kept out of the repository: the GitHub OAuth app and who may
 # publish. Copy .env.example to .env and fill it in. Values are read as Make
@@ -9,21 +11,30 @@
 export
 
 BIN     := dist/komodoc
-SOURCES := $(shell find src -type f) README.md
+# The markdown renderer, built for the browser: the editor previews with it,
+# and it is embedded in the binary like every other shell file.
+WASM    := src/shell/wasm/markdown.wasm
+# Optional, and built separately by `make typst`: see the bottom of this file.
+TYPST   := src/shell/wasm/typst.wasm
+MODULE  := target/wasm32-unknown-unknown/wasm/komodoc_engine.wasm
+# The renderers are generated, so they are not also inputs to themselves.
+SOURCES := $(filter-out $(WASM) $(TYPST),\
+  $(shell find src engine komodoc -type f -not -path '*/target/*')) Cargo.toml README.md
 
 .DEFAULT_GOAL := help
-.PHONY: help build test serve seed examples kill clean snapshot
+.PHONY: help build test serve seed examples kill clean snapshot wasm typst fmt
 
 help:  ## Display this help screen
 	@printf "\033[1mAvailable commands:\033[0m\n\n"
 	@grep -hE '^[a-z.A-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-22s\033[0m %s\n", $$1, $$2}' | sort
 
-build: $(BIN)  ## Build dist/komodoc, with the worker and shell embedded
+build: $(BIN)  ## Build dist/komodoc, with the shell and renderers embedded
 
-# Rebuilt whenever the tool or any worker/shell file changes.
-$(BIN): $(SOURCES)
+# Rebuilt whenever any source or shell file changes.
+$(BIN): $(SOURCES) $(WASM)
 	@mkdir -p $(dir $@)
-	@go build -o $@ ./src
+	@cargo build --release -p komodoc
+	@cp target/release/komodoc $@
 	@echo "$@ ($$(($$(stat -c%s $@) / 1024 / 1024)) MiB) -- deploys on its own"
 
 # The documentation page is the README, so it is copied in to be embedded. The
@@ -32,20 +43,23 @@ $(BIN) test: src/shell/README.md
 src/shell/README.md: README.md
 	@cp $< $@
 
-test:  ## Run gofmt, go vet and the test suite
-	@gofmt -l src | grep . && { echo "gofmt needed"; exit 1; } || true
-	@for file in src/shell/*.js src/worker/*.js; do node --check "$$file"; done
-	@go vet ./...
-	@go test ./...
+test: $(WASM)  ## Run rustfmt, clippy and the test suite
+	@cargo fmt --check
+	@for file in src/shell/*.js src/worker/*.js; do [ -e "$$file" ] && node --check "$$file" || true; done
+	@cargo clippy --workspace --all-targets -- -D warnings
+	@cargo test --workspace
 
-# Release builds are described in .goreleaser.yaml and run on GitHub Actions
-# when a v* tag is pushed. This does the same thing locally, without tagging.
-snapshot:  ## Cross-compile every platform into dist/, as a release would
-	@command -v goreleaser >/dev/null || { echo "goreleaser is not installed: go install github.com/goreleaser/goreleaser/v2@latest"; exit 1; }
-	@goreleaser release --snapshot --clean
+fmt:  ## Format every crate
+	@cargo fmt
+
+# Release builds are described in .github/workflows/release.yml and run when a
+# v* tag is pushed. This does the same thing locally, without tagging.
+snapshot: $(WASM) $(TYPST)  ## Build the release binary locally, without tagging
+	@cargo build --release -p komodoc
+	@echo "target/release/komodoc"
 
 clean:  ## Remove build output
-	@rm -rf dist
+	@rm -rf dist target/release/komodoc
 
 # The port is fixed because the GitHub OAuth app's callback URL names it.
 PORT       ?= 8081
@@ -58,13 +72,15 @@ serve: $(BIN)  ## Run the server and open it in Firefox (PORT=, DATA=, PUBLISHER
 	@$(BIN) serve --port $(PORT) --data $(DATA) --publishers $(PUBLISHERS) --commenters $(COMMENTERS)
 
 # One example per source format Komodoc accepts, each genuinely produced by the
-# tool it is named after. style-guide.html is hand-written and regression-tables.md
-# is rendered by Komodoc itself at publish time, so neither has a rule below.
+# tool it is named after. style-guide.html is hand-written, and the .md and the
+# .typ are rendered by Komodoc itself at publish time, so none of the three has
+# a rule below.
 EXAMPLES := examples/bootstrap.html examples/newton.html \
             examples/random-walks.html examples/simpsons-paradox.html \
-            examples/style-guide.html examples/regression-tables.md
+            examples/style-guide.html examples/regression-tables.md \
+            examples/intervals.typ
 
-# Not in the help: a step of `deploy` and `deploy-sandbox`, not an entry point.
+# Not in the help: a step of `deploy`, not an entry point.
 examples: $(EXAMPLES)
 
 # Quarto and Calepin both inline their figures, so each output stands alone.
@@ -84,7 +100,7 @@ examples/%.html: examples/%.typ
 # Komodoc serves the rendered result as a static document, not as a live marimo
 # session. Its HTML still loads the marimo frontend from a CDN and keeps the
 # prose in a JSON island the page hydrates, so this one document is not
-# self-contained and carries no seeded annotations -- see seed_examples.go.
+# self-contained and carries no seeded annotations -- see seed_examples.rs.
 examples/%.html: examples/%.py
 	@cd examples && uv run --quiet marimo export html $(notdir $<) -o $(notdir $@) -f --no-include-code
 
@@ -103,53 +119,34 @@ kill:  ## Stop a server started with make serve
 	@# The bracket stops the pattern from matching this command line itself.
 	@pkill -f '[d]ist/komodoc serve' && echo "stopped" || echo "nothing to stop"
 
-# The two deployments. `deploy` is this machine; `deploy-sandbox` is the
-# Cloudflare service. Both start from a freshly seeded set of examples, so
-# either one is a known state rather than whatever was left over.
-#
-# There is only the one Cloudflare deployment for now, and it is a sandbox.
-# It reads its own _SANDBOX credentials, so a second, less disposable service
-# can be added later without either one inheriting the other's settings.
-# Supply them however you like -- in .env, or through sops:
-#
-#     sops exec-env .keys.yaml 'make deploy-sandbox'
-.PHONY: deploy deploy-sandbox
+.PHONY: deploy
 
 # No sign-in at all: publishing and commenting are both open, so this needs
 # no GitHub OAuth app and no `komodoc login`.
 deploy: seed  ## Seed the examples and serve them on this machine, no sign-in
 	@$(MAKE) serve PUBLISHERS=anyone COMMENTERS=anyone
 
-# The label is the first component of the server host, so the URL is stated
-# once and the two cannot drift apart.
-# Only these accounts may install the reserved examples; they never expire.
-EXAMPLE_PUBLISHERS ?= vincentarelbundock
-
-SANDBOX_LABEL = $(firstword $(subst ., ,$(patsubst https://%,%,$(KOMODOC_ENDPOINT_SANDBOX))))
-
-deploy-sandbox: $(BIN) $(EXAMPLES)  ## Deploy to Cloudflare and publish the examples there
-	@test -n "$$KOMODOC_ENDPOINT_SANDBOX" || { echo "set KOMODOC_ENDPOINT_SANDBOX"; exit 1; }
-	@test -n "$$KOMODOC_GITHUB_CLIENT_ID_SANDBOX" || { echo "set KOMODOC_GITHUB_CLIENT_ID_SANDBOX"; exit 1; }
-	@test -n "$$KOMODOC_GITHUB_CLIENT_SECRET_SANDBOX" || { echo "set KOMODOC_GITHUB_CLIENT_SECRET_SANDBOX"; exit 1; }
-	@# Through the environment, not the command line: an argument is visible
-	@# in ps to every process on the machine, an environment variable is not.
-	@KOMODOC_GITHUB_CLIENT_ID="$$KOMODOC_GITHUB_CLIENT_ID_SANDBOX" \
-		KOMODOC_GITHUB_CLIENT_SECRET="$$KOMODOC_GITHUB_CLIENT_SECRET_SANDBOX" \
-		$(BIN) deploy --label $(SANDBOX_LABEL) \
-		--publishers $(PUBLISHERS) --commenters $(COMMENTERS) --examples $(EXAMPLE_PUBLISHERS) \
-		--max-size 4 --quota 100 --expire-after 24h
-	@$(BIN) login --client-id "$$KOMODOC_GITHUB_CLIENT_ID_SANDBOX" --server "$$KOMODOC_ENDPOINT_SANDBOX"
-	@$(BIN) seed --server "$$KOMODOC_ENDPOINT_SANDBOX"
-
-# A target cannot export into the shell that ran make, so `secrets` opens a
-# subshell with the keys loaded. A one-off command can be wrapped as:
+# --- the browser renderers -------------------------------------------------
 #
-#     sops exec-env $(KEYS) 'make deploy-sandbox'
-KEYS ?= .keys.yaml
-.PHONY: secrets
+# One crate, built twice, each with one renderer: markdown is a few hundred
+# kilobytes and travels with the shell, while typst is the compiler and the
+# fonts it sets documents in -- thirty megabytes, fetched only by someone who
+# opens a typst document to edit.
 
-secrets:  ## Open an interactive shell with the sops-encrypted keys in its environment
-	@test -f $(KEYS) || { echo "no $(KEYS)"; exit 1; }
-	@test -t 0 || { echo "make secrets opens an interactive subshell and needs a terminal" >&2; echo "use: sops exec-env $(KEYS) 'make deploy-sandbox'" >&2; exit 2; }
-	@echo "$(KEYS) is loaded in this shell; exit to drop it"
-	@sops exec-env $(KEYS) "$${SHELL:-/bin/sh}"
+wasm: $(WASM)  ## Build the markdown renderer for the browser
+
+$(WASM): $(shell find engine/src -type f) engine/Cargo.toml engine/document.css
+	@cargo build --profile wasm --target wasm32-unknown-unknown -p komodoc-engine \
+		--no-default-features --features markdown
+	@mkdir -p $(dir $@)
+	@cp $(MODULE) $@
+	@echo "$@ ($$(($$(stat -c%s $@) / 1024)) KiB)"
+
+typst: $(TYPST)  ## Build the typst renderer for the browser (slow: ~30 MB)
+
+$(TYPST): $(shell find engine/src -type f) engine/Cargo.toml engine/document.css
+	@cargo build --profile wasm --target wasm32-unknown-unknown -p komodoc-engine \
+		--no-default-features --features typst
+	@mkdir -p $(dir $@)
+	@cp $(MODULE) $@
+	@echo "$@ ($$(($$(stat -c%s $@) / 1024 / 1024)) MiB)"

@@ -1,4 +1,7 @@
 import { anchorAll, flatten } from "./anchor.js";
+import * as editor from "./editor.js";
+import * as collab from "./collab.js";
+import * as sync from "./sync.js";
 
 const SLUG = location.pathname.split("/").pop();
 const frame = document.getElementById("docframe");
@@ -70,6 +73,7 @@ addEventListener("message", (event) => {
       // Where each figure sits in that text, so a note on a figure can be
       // ordered against the notes on passages.
       figureAt = Array.isArray(message.images) ? message.images.map(Number) : [];
+      offerBox(figureAt.length > 0);
       frameReady = true;
       // The agent's DOM was just rebuilt and rescanned, so whatever was
       // painted before is gone; the next applyHighlights must repaint in full.
@@ -86,6 +90,10 @@ addEventListener("message", (event) => {
       // does: it becomes what the next annotation is about.
       pending = { exact: "", prefix: "", suffix: "", position: null, region: message.region };
       placeBar(message.rect);
+      break;
+
+    case "caret":
+      followDocumentClick(Number(message.offset) || 0);
       break;
 
     case "focus":
@@ -302,7 +310,6 @@ function cardSignature(comment) {
   return JSON.stringify([
     comment.exact,
     comment.region,
-    comment.replacement,
     comment.body,
     comment.tags,
     comment.motivation,
@@ -312,7 +319,7 @@ function cardSignature(comment) {
   ]);
 }
 
-// The quote, marks, suggestion, body, tags and byline: whatever the reader
+// The quote, marks, body, tags and byline: whatever the reader
 // cannot type into and cannot leave mid-edit, so rebuilding it from scratch
 // on change costs nothing worth preserving.
 function updateStatic(card, comment) {
@@ -331,12 +338,6 @@ function updateStatic(card, comment) {
   } else {
     wrap.appendChild(quoteOf(comment.exact, card));
   }
-  // A suggested edit reads as what it proposes, not as a remark about it.
-  if (comment.replacement) {
-    const suggestion = element("p", comment.replacement);
-    suggestion.className = "suggestion";
-    wrap.appendChild(suggestion);
-  }
   if (comment.body) wrap.appendChild(element("p", comment.body));
   for (const tag of comment.tags || []) {
     const chip = element("button", tag);
@@ -351,12 +352,29 @@ function updateStatic(card, comment) {
   wrap.appendChild(element("small", comment.creator + " · " + stamp(comment.created)));
 }
 
+// The one line a resolved card shows: what it was about, then what was said
+// about it. Trimmed to a single line by CSS rather than by cutting the text,
+// so the width of the column decides how much of it fits.
+function summaryOf(comment) {
+  const about = comment.region
+    ? `Figure ${comment.region.image_index + 1}`
+    : (comment.exact || "").trim();
+  const said = (comment.body || "").trim();
+  return [about, said].filter(Boolean).join(" — ") || "Resolved";
+}
+
 // Built once per comment and reused after that. `card.comment` is a
 // reference into `comments`, and `receive` mutates that object in place
 // (Object.assign), so handlers below always see the current id/resolved/etc
 // without this needing to be told about it.
 function makeCard(comment) {
   const el = document.createElement("article");
+
+  // A resolved note is settled business: it collapses to this one line, and
+  // stays out of the way until someone clicks it open again.
+  const summary = document.createElement("div");
+  summary.className = "summary";
+  el.appendChild(summary);
 
   const staticWrap = document.createElement("div");
   el.appendChild(staticWrap);
@@ -379,6 +397,8 @@ function makeCard(comment) {
 
   const card = {
     el,
+    summary,
+    expanded: false, // a resolved card the reader clicked back open
     staticWrap,
     repliesList,
     repliesDrawn: [], // reply objects already rendered as <li>, in order
@@ -399,6 +419,8 @@ function makeCard(comment) {
     // comes back is idempotent with what we already drew.
     const target = card.comment;
     target.resolved = !target.resolved;
+    // Resolving collapses it again, however it was left open before.
+    card.expanded = false;
     render();
     applyHighlights();
     send({ type: "resolve", comment_id: target.id, resolved: target.resolved });
@@ -424,9 +446,15 @@ function makeCard(comment) {
 
   el.onclick = (event) => {
     const target = card.comment;
-    if (!target.orphaned && !event.target.closest("button,input,textarea")) {
-      tell({ type: "reveal", id: target.id });
+    if (event.target.closest("button,input,textarea")) return;
+    // Collapsed, the click is "show me this again"; open, it is "take me
+    // to the place in the document this is about".
+    if (target.resolved && !card.expanded) {
+      card.expanded = true;
+      render();
+      return;
     }
+    if (!target.orphaned) tell({ type: "reveal", id: target.id });
   };
 
   return card;
@@ -495,7 +523,12 @@ function updateCard(card, comment) {
   }
 
   // resolved/pending can flip on their own, independent of everything above.
-  card.el.className = comment.resolved || comment.pending ? "resolved" : "";
+  // A comment resolved by someone else while this card was open collapses too.
+  if (!comment.resolved) card.expanded = false;
+  const collapsed = Boolean(comment.resolved) && !card.expanded;
+  card.el.className =
+    (comment.resolved || comment.pending ? "resolved" : "") + (collapsed ? " collapsed" : "");
+  if (collapsed) card.summary.textContent = summaryOf(comment);
   card.resolveBtn.textContent = comment.resolved ? "Reopen" : "Resolve";
   // Deletability can change too: an optimistic comment gets `deletable: true`
   // once the server confirms it, and canModerate can arrive after the first render.
@@ -642,6 +675,89 @@ function receive(event) {
     alert(event.message);
     return;
   }
+  // The shared source: the state of a session as it stands, one more change to
+  // it, or how many people are in it. All three are meaningless unless this
+  // browser is editing, and are ignored until it is.
+  if (event.type === "y-state") {
+    session?.start(event, savedSource);
+    peers(event.count || 1);
+    return;
+  }
+  if (event.type === "y-update") {
+    session?.apply(event.update);
+    return;
+  }
+  if (event.type === "y-snapshot") {
+    // The session's history grew long enough that a latecomer would have to
+    // replay all of it. This browser sends the whole state instead, and the
+    // server keeps that one update in place of the rest.
+    if (session) send({ type: "y-update", update: session.snapshot(), replace: true });
+    return;
+  }
+  if (event.type === "y-peers") {
+    peers(event.count || 1);
+    return;
+  }
+
+  // Someone published a new version of this document -- another reader saving
+  // in their own editor, or the same document republished from the command
+  // line. What to do about it depends on what this reader is in the middle of.
+  if (event.type === "published") {
+    if (!event.sha || event.sha === shownSHA) return;
+    // In a shared session everyone is typing into one source, so a save by any
+    // of them publishes what all of them have. That is not a conflict, and
+    // warning about it would make collaborating feel like colliding: the
+    // others simply move on to the version that now exists.
+    if (session) {
+      shownSHA = event.sha;
+      fetch(`/api/documents/${SLUG}/source`, { headers: SHELL_HEADERS })
+        .then((response) => (response.ok ? response.json() : Promise.reject(new Error("no source"))))
+        .then((payload) => {
+          baseSHA = payload.sha || "";
+          if ((payload.source || "") === session.text()) {
+            // What was published is what this browser is looking at.
+            savedSource = payload.source || "";
+            saveButton.disabled = true;
+            say("saved");
+            return;
+          }
+          // Published from somewhere outside the session -- the command line,
+          // or a browser that was not in it. Their work is not this page's to
+          // discard, and the save that would discard it is refused anyway.
+          say("a newer version was published — reload before saving", true);
+        })
+        .catch(() => {});
+      return;
+    }
+    if (dirty()) {
+      // Their work is not this page's to discard, and the save that would
+      // discard theirs is refused anyway. Say so now rather than at save time.
+      say("a newer version was published — reload before saving", true);
+      return;
+    }
+    shownSHA = event.sha;
+    if (editing) {
+      // The source this editor is showing is no longer the document's, and
+      // nothing has been typed over it, so take the new one.
+      fetch(`/api/documents/${SLUG}/source`, { headers: SHELL_HEADERS })
+        .then((response) => (response.ok ? response.json() : Promise.reject(new Error("no source"))))
+        .then(async (payload) => {
+          sourceBox.value = savedSource = payload.source || "";
+          baseSHA = payload.sha || "";
+          // After the repaint, which ends by saying whether there is anything
+          // unsaved -- and would otherwise write over this.
+          await paintPreview();
+          say("updated by someone else");
+        })
+        .catch(() => {});
+      return;
+    }
+    // Reading rather than editing: show the version that now exists. The
+    // frame republishes its text on load, which re-anchors every comment.
+    frame.src = `${docsOrigin}/raw/${SLUG}/${event.sha}.html`;
+    return;
+  }
+
   if (event.type === "comment") {
     const local = comments.find((comment) => comment.temp_id === event.temp_id);
     // Broadcasts carry no `deletable` field, so the caller's own comment,
@@ -743,6 +859,17 @@ document.getElementById("signOut").onclick = async () => {
 let tool = "commenting";
 const toolButtons = [...document.querySelectorAll(".tool")];
 
+// Box draws on a figure, so a document with no figures has nothing for it to
+// do. Saying so is better than a button that silently does nothing.
+function offerBox(any) {
+  const box = toolButtons.find((button) => button.dataset.tool === "region");
+  if (!box) return;
+  box.disabled = !any;
+  box.title = any ? "Drag a box on a figure" : "This document has no figures to draw on";
+  // Leaving it chosen would arm a drag that can never start.
+  if (!any && tool === "region") toolButtons[0].click();
+}
+
 for (const button of toolButtons) {
   button.onclick = () => {
     tool = button.dataset.tool;
@@ -763,7 +890,7 @@ bar.onclick = () => {
 
   if (tool === "highlighting") {
     // No dialog: the passage is the whole annotation.
-    submitAnnotation({ motivation: "highlighting", body: "", replacement: "", tags: [] });
+    submitAnnotation({ motivation: "highlighting", body: "", tags: [] });
     return;
   }
 
@@ -781,18 +908,14 @@ function showCommentDialog() {
   document.getElementById("selectedQuote").textContent = pending.region
     ? `Figure ${pending.region.image_index + 1}`
     : "“" + pending.exact + "”";
-  document.getElementById("replacementField").hidden = tool !== "editing";
-  // A region has no passage to replace, so the edit tool falls back to a remark.
-  document.getElementById("bodyLabel").textContent =
-    tool === "editing" ? "Why" : tool === "questioning" ? "Question" : "Comment";
-  if (tool === "editing") document.getElementById("replacement").value = pending.exact;
+  document.getElementById("bodyLabel").textContent = "Comment";
   dialog.showModal();
-  document.getElementById(tool === "editing" ? "replacement" : "body").focus();
+  document.getElementById("body").focus();
 }
 
 // One path for every kind, whether it came from the dialog or straight from
 // the highlight tool.
-function submitAnnotation({ motivation, body, replacement, tags }) {
+function submitAnnotation({ motivation, body, tags }) {
   if (!pending) return;
   const creator = document.getElementById("author").value;
   if (!identity) localStorage.setItem("komodoc-author", creator);
@@ -804,7 +927,6 @@ function submitAnnotation({ motivation, body, replacement, tags }) {
     ...pending,
     motivation,
     body,
-    replacement,
     tags,
     creator: creator || "Anonymous",
     created: new Date().toISOString(),
@@ -818,7 +940,7 @@ function submitAnnotation({ motivation, body, replacement, tags }) {
   comments.push(optimistic);
   render();
   applyHighlights();
-  send({ type: "comment", ...pending, motivation, body, replacement, tags, creator, temp_id });
+  send({ type: "comment", ...pending, motivation, body, tags, creator, temp_id });
   pending = null;
 }
 
@@ -827,11 +949,9 @@ document.getElementById("commentForm").onsubmit = (event) => {
   submitAnnotation({
     motivation: tool === "region" ? "commenting" : tool,
     body: document.getElementById("body").value,
-    replacement: tool === "editing" ? document.getElementById("replacement").value : "",
     tags: parseTags(document.getElementById("tags").value),
   });
   document.getElementById("body").value = "";
-  document.getElementById("replacement").value = "";
   document.getElementById("tags").value = "";
   dialog.close();
 };
@@ -869,16 +989,379 @@ fetch(`/api/documents/${SLUG}`)
     document.getElementById("docTitle").textContent = doc.title;
     // Documents live on their own origin, which the deployment names.
     docsOrigin = doc.docs_origin || location.origin;
+    shownSHA = doc.sha;
     frame.src = `${docsOrigin}/raw/${SLUG}/${doc.sha}.html`;
     // Whether this caller owns the document, which unlocks deleting anyone's
     // comment on it. This can arrive after comments have already rendered
     // once without it, so redraw to pick it up.
     canModerate = Boolean(doc.can_moderate);
+    docTitle = doc.title;
     render();
+    offerEditing(doc);
   })
   .catch(() => {
     document.getElementById("docTitle").textContent = "Document not found";
   });
+
+/* ---------------------------------------------------------------- editing */
+
+// A document published from markdown can be edited here by whoever may
+// replace it. Everything below is inert for everyone else and for every
+// document that has no source: the buttons stay hidden and the renderer is
+// never fetched.
+
+const readerPane = document.getElementById("reader");
+const editorPane = document.getElementById("editorPane");
+const sourceBox = document.getElementById("editorSource");
+const sourceButton = document.getElementById("sourceToggle");
+const previewButton = document.getElementById("previewToggle");
+const commentsButton = document.getElementById("commentsToggle");
+const saveButton = document.getElementById("saveDoc");
+const editState = document.getElementById("editState");
+const peerCount = document.getElementById("peerCount");
+const linkButton = document.getElementById("linkToggle");
+
+// Whether a click in one pane takes the other to the same place. Off by
+// default -- it moves the document under the reader, which is helpful when
+// asked for and startling when not -- and remembered per reader.
+let linked = false;
+try {
+  linked = localStorage.getItem("komodoc-linked") === "1";
+} catch {
+  /* storage disabled; it starts off, as it does anyway */
+}
+
+let editing = false;
+let savedSource = ""; // what is published, so "unsaved" is a fact not a guess
+let docTitle = "";
+let sourceFormat = ""; // what the document was published from, and renders as
+// The version this editor opened, sent back with every save. If the document
+// has moved on since -- someone else saved, or the same person in another tab
+// -- the server refuses rather than letting this save discard their work.
+let baseSHA = "";
+// The version the document frame is showing. A "published" broadcast naming
+// this one is our own save coming back, and means nothing new.
+let shownSHA = "";
+// The shared source, while this browser is editing. Everyone with the document
+// open in an editor is typing into the same one.
+let session = null;
+
+const dirty = () => editing && sourceBox.value !== savedSource;
+
+// What the document is called, which is what the rendered page is titled. The
+// title it was published under wins; a document that never had one is named by
+// its own first heading, the way `publish` names one.
+async function headingOf(source) {
+  return docTitle || (await editor.titleOf(source, sourceFormat)) || "Untitled";
+}
+
+function say(text, problem = false) {
+  editState.hidden = !text;
+  editState.textContent = text;
+  editState.className = "editstate" + (problem ? " problem" : "");
+}
+
+// Painting the preview is sending it to the frame: the draft is a document,
+// and a document belongs on the documents origin, not in this page. The agent
+// republishes its text from there, which lands in the "ready" handler above
+// and re-anchors every comment against what was just typed.
+let issued = 0;
+let painted = 0;
+
+async function paintPreview() {
+  const mine = ++issued;
+  const source = sourceBox.value;
+  try {
+    const html = await editor.render(source, await headingOf(source), sourceFormat);
+    // A slower render that resolves late must not paint over a newer one.
+    if (mine <= painted) return;
+    painted = mine;
+    tell({ type: "preview", html });
+    say(dirty() ? "unsaved changes" : "saved");
+  } catch (error) {
+    if (mine > painted) say(error.message || "could not render", true);
+  }
+}
+
+// Short enough to read as live -- the renderer takes single-digit
+// milliseconds -- and long enough that a burst of typing is one render.
+let previewTimer = null;
+sourceBox.addEventListener("input", () => {
+  saveButton.disabled = !dirty();
+  say(dirty() ? "unsaved changes" : "saved");
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(paintPreview, 60);
+});
+
+// A caret moved in the source. Only a deliberate move counts: typing moves the
+// caret constantly, and scrolling the document on every keystroke would make
+// the preview unreadable.
+let stepTimer = null;
+function followCaret() {
+  if (!linked || !editing || docText === null) return;
+  clearTimeout(stepTimer);
+  stepTimer = setTimeout(() => {
+    const place = sync.documentPlaceFor(sourceBox.value, sourceBox.selectionStart, docText);
+    if (place) {
+      tell({ type: "locate", start: place.at, length: place.length });
+      lost(false);
+      return;
+    }
+    // The words at the caret are not findable in the document: a formula, a
+    // table cell, a heading that renders as something else. Said rather than
+    // ignored, because a lock that silently does nothing is indistinguishable
+    // from one that is broken.
+    lost(true);
+  }, 120);
+}
+sourceBox.addEventListener("click", followCaret);
+sourceBox.addEventListener("keyup", (event) => {
+  if (event.key.startsWith("Arrow") || event.key === "PageUp" || event.key === "PageDown") followCaret();
+});
+
+// And the other way: a click in the document puts the caret on the words it
+// landed on. The textarea does not scroll to its own selection, so the line is
+// worked out and scrolled to by hand.
+function followDocumentClick(offset) {
+  if (!linked || !editing || docText === null) return;
+  const at = sync.sourcePlaceFor(docText, offset, sourceBox.value);
+  if (at === null) {
+    lost(true);
+    return;
+  }
+  lost(false);
+  sourceBox.focus();
+  sourceBox.setSelectionRange(at, at);
+  const line = sourceBox.value.slice(0, at).split("\n").length;
+  const lineHeight = parseFloat(getComputedStyle(sourceBox).lineHeight) || 20;
+  sourceBox.scrollTop = Math.max(0, (line - 4) * lineHeight);
+}
+
+// Whether the last attempt to keep the two in step found anywhere to go. Said
+// beside the lock, and cleared by the next attempt that works.
+function lost(yes) {
+  if (!yes) {
+    if (editState.textContent === NO_MATCH) say(dirty() ? "unsaved changes" : "saved");
+    return;
+  }
+  say(NO_MATCH, true);
+}
+const NO_MATCH = "no matching passage — the two are still linked";
+
+function setLinked(on) {
+  linked = on;
+  linkButton.setAttribute("aria-pressed", String(on));
+  try {
+    localStorage.setItem("komodoc-linked", on ? "1" : "0");
+  } catch {
+    /* it still applies to this page */
+  }
+}
+linkButton.addEventListener("click", () => setLinked(!linked));
+
+addEventListener("beforeunload", (event) => {
+  if (dirty()) event.preventDefault();
+});
+
+// Ctrl/Cmd-S, because everyone tries it in an editor.
+addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key === "s" && editing) {
+    event.preventDefault();
+    save();
+  }
+});
+
+// Saving is publishing a revision: the same upload the CLI makes, carrying
+// the source beside the rendered page so the next edit reopens what was
+// actually saved. The comments stay where they are and re-anchor.
+async function save() {
+  if (!dirty()) return;
+  saveButton.disabled = true;
+  say("saving…");
+  const source = session ? session.text() : sourceBox.value;
+  try {
+    const title = await headingOf(source);
+    const html = await editor.render(source, title, sourceFormat);
+    const response = await fetch("/api/documents", {
+      method: "POST",
+      headers: { "content-type": "application/json", ...SHELL_HEADERS },
+      body: JSON.stringify({
+        title, slug: SLUG, html, source, source_format: sourceFormat, base_sha: baseSHA,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      // A conflict is the one refusal worth spelling out: nothing was written,
+      // and what to do about it is the reader's decision, not this page's.
+      say(
+        response.status === 409
+          ? "published elsewhere while you were editing — reload to see it before saving over it"
+          : body.error || `save failed (${response.status})`,
+        true,
+      );
+      saveButton.disabled = false;
+      return;
+    }
+    savedSource = source;
+    baseSHA = shownSHA = body.sha || baseSHA;
+    say("saved");
+  } catch (error) {
+    say(error.message || "save failed", true);
+    saveButton.disabled = false;
+  }
+}
+
+saveButton.addEventListener("click", save);
+
+// Editing a document and looking at its source are two different things, and
+// conflating them was a bug: hiding the source pane used to leave the session
+// altogether, so the preview stopped following what was being typed -- by
+// anyone, including other people. The session lasts as long as the document is
+// open; the pane is a view of it, which can be folded away like any other.
+function startEditing() {
+  if (editing) return;
+  editing = true;
+  saveButton.hidden = false;
+  saveButton.disabled = !dirty();
+  linkButton.hidden = false;
+  setLinked(linked);
+  say("saved");
+  openSession();
+  showSource(true);
+  paintPreview();
+  sourceBox.focus();
+}
+
+// Whether the source pane is on the screen. Nothing else changes with it: the
+// text is still shared, the preview still follows it, and a save still saves.
+function showSource(on) {
+  editorPane.hidden = !on;
+  readerPane.classList.toggle("editing", on);
+  sourceButton.setAttribute("aria-pressed", String(on));
+  // A pane just appeared or went away, so what each of the others may take has
+  // changed with it.
+  fitPanes();
+}
+
+// The shared source. Everyone editing this document is typing into one
+// document, and what each of them sees rendered is what they now have --
+// rendering stays in the browser, so a session costs the deployment nothing
+// beyond relaying a few dozen bytes per keystroke.
+function openSession() {
+  if (session) return;
+  session = collab.join({
+    send,
+    textarea: sourceBox,
+    // Someone else's typing arrived: the preview follows it, and the save
+    // button follows whether the shared source still matches what is
+    // published.
+    onText: () => {
+      saveButton.disabled = !dirty();
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(paintPreview, 60);
+    },
+    onPeers: peers,
+  });
+  send({ type: "y-open" });
+}
+
+// Leaving the page. The session on the server ends when the last person in it
+// disconnects, which the socket closing does on its own; this is only this
+// browser letting go of its half.
+function closeSession() {
+  session?.leave();
+  session = null;
+}
+addEventListener("pagehide", closeSession);
+
+// How many people have this document open in an editor, said only when it is
+// more than one: alone is the ordinary case and needs no notice.
+function peers(count) {
+  if (!editing) return;
+  peerCount.hidden = count < 2;
+  peerCount.textContent = count < 2 ? "" : `${count} editing`;
+}
+
+// The two panes beside the source fold away rather than unmount, so the frame
+// keeps its document and the sidebar keeps its cards and its scroll.
+// The three panes, and the buttons that show and hide them. Each button says
+// whether its pane is showing; the group is the answer to "what am I looking
+// at", which is a different question from what the annotation tools answer.
+const showing = () => ({
+  source: readerPane.classList.contains("editing"),
+  preview: !readerPane.classList.contains("no-preview"),
+  comments: !readerPane.classList.contains("no-comments"),
+});
+
+const paneButtons = {
+  source: sourceButton,
+  preview: previewButton,
+  comments: commentsButton,
+};
+
+// Hiding the last one would leave the window empty, which is never what was
+// meant: the button refuses, and stays pressed.
+function togglePane(which) {
+  const shown = showing();
+  const turningOff = shown[which];
+  if (turningOff && Object.values(shown).filter(Boolean).length === 1) return;
+
+  if (which === "source") {
+    showSource(!turningOff);
+    return;
+  }
+  readerPane.classList.toggle(which === "preview" ? "no-preview" : "no-comments", turningOff);
+  syncPaneButtons();
+  fitPanes();
+}
+
+function syncPaneButtons() {
+  const shown = showing();
+  for (const [which, button] of Object.entries(paneButtons)) {
+    button.setAttribute("aria-pressed", String(shown[which]));
+  }
+}
+
+for (const [which, button] of Object.entries(paneButtons)) {
+  button.addEventListener("click", () => togglePane(which));
+}
+syncPaneButtons();
+
+// Offered only when there is something to edit and someone allowed to edit it.
+// The source is asked for once, and the renderer starts downloading with it,
+// so clicking Edit does not then wait for five megabytes.
+function offerEditing(doc) {
+  // can_edit, not can_moderate: moderating is about this document's comments,
+  // editing is about replacing the document, and a reserved example is
+  // everyone's to annotate and the deployment's to change.
+  const mayEdit = doc.can_edit === undefined ? doc.can_moderate : doc.can_edit;
+  if (!mayEdit || !doc.source_format) return;
+  // A document is editable here only if this deployment can render what it
+  // was written in. Markdown always; typst when its renderer was built, which
+  // is thirty megabytes of WebAssembly and so optional. A document whose
+  // format this deployment cannot render is read and annotated as usual, and
+  // says so rather than offering an editor that could not save.
+  const renderers = Array.isArray(doc.renderers) ? doc.renderers : ["markdown"];
+  if (!renderers.includes(doc.source_format)) {
+    say(`${doc.source_format} documents are edited with komodoc serve`);
+    return;
+  }
+  sourceFormat = doc.source_format;
+  fetch(`/api/documents/${SLUG}/source`, { headers: SHELL_HEADERS })
+    .then((response) => (response.ok ? response.json() : Promise.reject(new Error("no source"))))
+    .then((payload) => {
+      sourceBox.value = savedSource = payload.source || "";
+      baseSHA = payload.sha || "";
+      sourceButton.hidden = false;
+      editor.warm(sourceFormat);
+      // A document with a source opens ready to be worked on: that is what
+      // its author came for.
+      startEditing();
+    })
+    .catch(() => {
+      /* not editable here; the reader is unchanged */
+    });
+}
 
 // Who you are decides how your comments are signed. Signed in, the name is
 // your GitHub login and there is nothing to type; the server ignores anything
@@ -917,40 +1400,106 @@ fetch("/api/me")
 
 /* ------------------------------------------------------------------- grip */
 
-// The comment pane can be dragged wider or narrower, within limits: never so
-// wide that the document is a strip, never so narrow that a comment cannot be
-// read. The width is remembered per reader, not per document.
-const SIDEBAR_KEY = "komodoc-sidebar";
-const SIDEBAR_MIN = 240; // px, about the narrowest a comment card reads at
-const SIDEBAR_MAX = 0.6; // of the window, so the document always keeps 40%
-
+// Both splits are draggable, and they work the same way: the pane either side
+// of a separator can be made wider or narrower, within limits -- never so wide
+// that what it sits beside is a strip, never so narrow that it cannot be read.
+// Each width is remembered per reader, not per document.
+//
+// The two differ only in which edge they are measured from. The comment pane
+// is sized from the right of the window; the source pane, on the far side of
+// the document, from the left.
 const reader = document.querySelector("main.reader");
-const grip = document.getElementById("grip");
 const gripGuide = document.getElementById("gripGuide");
 
-function clampSidebar(width) {
-  return Math.round(Math.max(SIDEBAR_MIN, Math.min(width, innerWidth * SIDEBAR_MAX)));
+// What the document keeps between the two of them. Each pane's own ceiling
+// bounds it against the whole window, which says nothing about the two of them
+// together: dragged wide one after the other, they would leave the document a
+// sliver. This is the width that is not theirs to take.
+const DOCUMENT_MIN = 360;
+
+const panes = {
+  sidebar: {
+    grip: document.getElementById("grip"),
+    property: "--komodoc-sidebar",
+    key: "komodoc-sidebar",
+    min: 240, // px, about the narrowest a comment card reads at
+    max: 0.6, // of the window, so what it sits beside always keeps 40%
+    // Distance from the right edge, since the comments are the last column.
+    widthAt: (x) => innerWidth - x,
+    edgeAt: (width) => innerWidth - width,
+    // Which arrow key grows this pane: the comments grow leftwards.
+    grows: "ArrowLeft",
+    shown: () => !reader.classList.contains("no-comments"),
+  },
+  editor: {
+    grip: document.getElementById("editorGrip"),
+    property: "--komodoc-editor",
+    key: "komodoc-editor",
+    min: 320, // px, about the narrowest a line of source reads at
+    max: 0.7,
+    widthAt: (x) => x,
+    edgeAt: (width) => width,
+    grows: "ArrowRight",
+    shown: () => reader.classList.contains("editing"),
+  },
+};
+
+function clamp(pane, width) {
+  const other = pane === panes.sidebar ? panes.editor : panes.sidebar;
+  // What is left once the other pane has what it has and the document has what
+  // it must keep -- and nothing is kept for a document that is folded away.
+  const separators = Object.values(panes)
+    .filter((each) => each.grip && each.shown())
+    .reduce((total, each) => total + each.grip.offsetWidth, 0);
+  const spare =
+    innerWidth -
+    separators -
+    (other.shown() ? widthOf(other) : 0) -
+    (reader.classList.contains("no-preview") ? 0 : DOCUMENT_MIN);
+  // The minimum still wins on a window too narrow for any of this: a pane too
+  // small to read is not an improvement on a document too small to read.
+  const ceiling = Math.max(pane.min, Math.min(innerWidth * pane.max, spare));
+  return Math.round(Math.max(pane.min, Math.min(width, ceiling)));
 }
 
-function setSidebar(width) {
-  const limit = clampSidebar(width);
-  reader.style.setProperty("--komodoc-sidebar", limit + "px");
+function setWidth(pane, width) {
+  const limit = clamp(pane, width);
+  reader.style.setProperty(pane.property, limit + "px");
   return limit;
 }
 
-try {
-  const remembered = Number(localStorage.getItem(SIDEBAR_KEY));
-  if (remembered) setSidebar(remembered);
-} catch {
-  /* storage disabled; the default width stands */
+// The width this pane currently has, read back from the element rather than
+// from the variable, so a pane that has never been dragged reports the width
+// the stylesheet gave it.
+function widthOf(pane) {
+  const current = parseInt(getComputedStyle(reader).getPropertyValue(pane.property), 10);
+  return Number.isFinite(current) ? current : pane.min;
 }
 
-if (grip) {
+function remember(pane, width) {
+  try {
+    localStorage.setItem(pane.key, String(width));
+  } catch {
+    /* the width still applies to this page */
+  }
+}
+
+for (const pane of Object.values(panes)) {
+  try {
+    const stored = Number(localStorage.getItem(pane.key));
+    if (stored) setWidth(pane, stored);
+  } catch {
+    /* storage disabled; the default width stands */
+  }
+
+  const grip = pane.grip;
+  if (!grip) continue;
+
   // While dragging, only the guide line moves; the real width -- and the
   // iframe reflow that comes with it -- is applied once, on release.
-  function guideAt(width) {
-    if (gripGuide) gripGuide.style.left = innerWidth - clampSidebar(width) + "px";
-  }
+  const guideAt = (width) => {
+    if (gripGuide) gripGuide.style.left = pane.edgeAt(clamp(pane, width)) + "px";
+  };
 
   grip.addEventListener("pointerdown", (event) => {
     event.preventDefault();
@@ -960,14 +1509,14 @@ if (grip) {
     // for the duration of the drag rather than the drag being lost over it.
     frame.style.pointerEvents = "none";
     if (gripGuide) {
-      guideAt(innerWidth - event.clientX);
+      guideAt(pane.widthAt(event.clientX));
       gripGuide.hidden = false;
     }
   });
 
   grip.addEventListener("pointermove", (event) => {
     if (!grip.hasPointerCapture(event.pointerId)) return;
-    guideAt(innerWidth - event.clientX);
+    guideAt(pane.widthAt(event.clientX));
   });
 
   const finish = (event) => {
@@ -976,34 +1525,27 @@ if (grip) {
     grip.classList.remove("dragging");
     frame.style.pointerEvents = "";
     if (gripGuide) gripGuide.hidden = true;
-    try {
-      localStorage.setItem(SIDEBAR_KEY, String(setSidebar(innerWidth - event.clientX)));
-    } catch {
-      /* the width still applies to this page */
-    }
+    remember(pane, setWidth(pane, pane.widthAt(event.clientX)));
   };
   grip.addEventListener("pointerup", finish);
   grip.addEventListener("pointercancel", finish);
 
   // Keyboard: the separator is focusable, so it should move without a pointer.
   grip.addEventListener("keydown", (event) => {
-    const step = event.key === "ArrowLeft" ? 24 : event.key === "ArrowRight" ? -24 : 0;
-    if (!step) return;
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
     event.preventDefault();
-    const width = setSidebar(reader.getBoundingClientRect().width - frame.getBoundingClientRect().width + step);
-    try {
-      localStorage.setItem(SIDEBAR_KEY, String(width));
-    } catch {
-      /* nothing to remember it with */
-    }
+    const step = event.key === pane.grows ? 24 : -24;
+    remember(pane, setWidth(pane, widthOf(pane) + step));
   });
 }
 
-// A window narrower than the remembered width would leave no document.
-addEventListener("resize", () => {
-  const current = parseInt(getComputedStyle(reader).getPropertyValue("--komodoc-sidebar"), 10);
-  if (current) setSidebar(current);
-});
+// Re-clamped whenever the room changes: a narrower window, the editor
+// opening, or a pane folding away. Each is set from what it has now, so the
+// only thing that moves is a pane that no longer fits.
+function fitPanes() {
+  for (const pane of Object.values(panes)) setWidth(pane, widthOf(pane));
+}
+addEventListener("resize", fitPanes);
 
 // When this document was last opened, kept per reader so the landing page can
 // sort by it. Nothing about it leaves the browser.

@@ -67,34 +67,34 @@
       <ul>
         <!-- The identity block is the same pair, in the same order, as the
              landing page. -->
-        <!-- The tool decides what a selection becomes. Highlight needs no
-             words, so it is made the moment you select; the rest open the
-             dialog with their kind already chosen. -->
         <li class="navtools">
-          <div class="tools" role="radiogroup" aria-label="Annotation tool">
-            <button type="button" class="tool" data-tool="commenting" aria-label="Comment" title="Comment" aria-pressed="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></svg>
+          <!-- The page's own address is the secret link to this document, so
+               copying it is how a reader passes the document on. -->
+          <!-- Which panes are showing. A group of its own, separate from the
+               annotation tools: these change what you are looking at, not what
+               a selection would become. -->
+          <div class="panes" role="group" aria-label="Panes">
+            <button type="button" id="sourceToggle" class="pane outline iconbtn" aria-label="Show or hide the source" title="Source" aria-pressed="false" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></svg>
             </button>
-            <button type="button" class="tool" data-tool="questioning" aria-label="Question" title="Question" aria-pressed="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+            <button type="button" id="previewToggle" class="pane outline iconbtn" aria-label="Show or hide the document" title="Document" aria-pressed="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M10 9H8"/><path d="M16 13H8"/><path d="M16 17H8"/></svg>
             </button>
-            <button type="button" class="tool" data-tool="highlighting" aria-label="Highlight" title="Highlight, with no comment" aria-pressed="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+            <button type="button" id="commentsToggle" class="pane outline iconbtn" aria-label="Show or hide the comments" title="Comments" aria-pressed="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></svg>
             </button>
-            <button type="button" class="tool" data-tool="editing" aria-label="Suggest an edit" title="Suggest an edit" aria-pressed="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.364 13.634a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506l4.013-4.009a1 1 0 0 0-3.004-3.004z"/><path d="M14.487 7.858A1 1 0 0 1 14 7V2"/><path d="M20 19.645V20a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l2.516 2.516"/><path d="M8 18h1"/></svg>
-            </button>
-            <button type="button" class="tool" data-tool="region" aria-label="Mark a figure" title="Drag a box on a figure" aria-pressed="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h2"/><path d="M14 3h1"/><path d="M3 9v1"/><path d="M21 9v2"/><path d="M3 14v1"/><path d="m21 15 -3 3 -2 -2 -3 3v-8z"/></svg>
-            </button>
-            <button type="button" class="tool" data-tool="assessing" aria-label="Assess" title="Assess: a judgement on the passage" aria-pressed="false">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="m19 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1"/><path d="m5 8 3 8a5 5 0 0 1-6 0zV7"/><path d="M7 21h10"/></svg>
+            <!-- Locked, a click in either the source or the document takes the
+                 other one to the same place. -->
+            <button type="button" id="linkToggle" class="pane outline iconbtn" aria-label="Keep the source and the document in step" title="Keep in step" aria-pressed="false" hidden>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
             </button>
           </div>
-          <!-- The page's own address is the secret link to this document, so
-               copying it is how a reader passes the document on. It sits in the
-               tool row to be the same size and on the same line, but outside the
-               radiogroup: it makes no annotation and is never the chosen tool. -->
+          <button type="button" id="saveDoc" class="iconbtn" aria-label="Save a new version" title="Save" hidden disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/></svg>
+          </button>
+          <!-- Said only when there is more than one person editing. -->
+          <small id="peerCount" class="editstate peers" hidden></small>
+          <small id="editState" class="editstate" hidden></small>
           <button type="button" id="copyLink" class="outline iconbtn" aria-label="Copy the link to this document" title="Copy link">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           </button>
@@ -104,7 +104,18 @@
         <li><button type="button" id="signOut" hidden>Sign out</button></li>
       </ul>
     </nav>
-    <main class="reader">
+    <main class="reader" id="reader">
+      <!-- The source, for a document published from markdown and opened by
+           whoever may replace it. Rendering happens here, in WebAssembly built
+           from the same package the server renders with, so the preview beside
+           it is the document that a save would store. -->
+      <section class="editorpane" id="editorPane" hidden>
+        <textarea id="editorSource" spellcheck="false" aria-label="Document source"></textarea>
+      </section>
+      <!-- The same separator as the one before the comments, and it works the
+           same way: drag it, or focus it and use the arrow keys. -->
+      <div id="editorGrip" class="grip" role="separator" aria-orientation="vertical"
+           aria-label="Resize the editor pane" tabindex="0"></div>
       <section class="viewport">
         <!-- allow-same-origin refers to the document's own origin, not this one, so
              the agent can read the document while the document can read nothing here. -->
@@ -117,6 +128,22 @@
            reflowing on every pointermove. -->
       <div id="gripGuide" class="grip-guide" hidden></div>
       <aside class="sidebar">
+        <!-- The tools belong with the comments they make, and stay in view
+             while the pane scrolls. -->
+        <div class="tools" role="radiogroup" aria-label="Annotation tool">
+          <button type="button" class="tool" data-tool="commenting" aria-label="Comment" title="Comment on the selected passage" aria-pressed="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 17a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 21.286V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2z"/><path d="M7 11h10"/><path d="M7 15h6"/><path d="M7 7h8"/></svg>
+            <span>Comment</span>
+          </button>
+          <button type="button" class="tool" data-tool="highlighting" aria-label="Highlight" title="Highlight, with no comment" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11-6 6v3h9l3-3"/><path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"/></svg>
+            <span>Highlight</span>
+          </button>
+          <button type="button" class="tool" data-tool="region" aria-label="Box" title="Drag a box on a figure" aria-pressed="false">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M9 21h2"/><path d="M14 3h1"/><path d="M3 9v1"/><path d="M21 9v2"/><path d="M3 14v1"/><path d="m21 15 -3 3 -2 -2 -3 3v-8z"/></svg>
+            <span>Box</span>
+          </button>
+        </div>
         <hgroup>
           <h3>Comments <small id="count"></small></h3>
           <p id="hint">Highlight text in the document, then choose “Comment”.</p>
@@ -138,10 +165,6 @@
           <a href="/auth/login">Sign in with GitHub</a> to comment on this document.
         </p>
         <!-- Only a suggested edit proposes text, so this appears only then. -->
-        <div id="replacementField" hidden>
-          <label for="replacement">Replace the passage with</label>
-          <textarea id="replacement" rows="3" maxlength="5000"></textarea>
-        </div>
         <label for="body" id="bodyLabel">Comment</label>
         <textarea id="body" rows="5" maxlength="5000" required></textarea>
         <label for="tags">Tags <small>optional, comma separated</small></label>

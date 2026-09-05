@@ -41,10 +41,7 @@
   // buttons and the sidebar labels, which use the same hues.
   const TINTS = {
     commenting: [42, 55],
-    questioning: [255, 30],
     highlighting: [145, 28],
-    editing: [8, 45],
-    assessing: [195, 35],
   };
   const NEUTRAL = [220, 12]; // resolved: the colour has served its purpose
   const tintOf = (motivation) => TINTS[motivation] || TINTS.commenting;
@@ -132,7 +129,33 @@
   // the same set of comments -- and each segment is painted once, whatever
   // order the comments arrive in. Painting runs right to left, which leaves the
   // node and offset of every piece still to come untouched.
+  // The ranges last asked for, so a repaint of the document can put the marks
+  // back in the same breath rather than a round trip later.
+  let lastRanges = [];
+
+  // Those ranges are offsets into the text as it was, and the text has just
+  // changed. Typing is one edit at one place, so the difference is entirely
+  // described by where the two texts stop agreeing and how much longer or
+  // shorter the new one is: everything after that point moves by exactly that
+  // much. Without this the marks are painted a few characters off until the
+  // sidebar's own answer lands, which reads as a twitch on every keystroke.
+  function shiftRanges(ranges) {
+    const before = published || "";
+    scan();
+    const after = text();
+    let same = 0;
+    while (same < before.length && same < after.length && before[same] === after[same]) same++;
+    const delta = after.length - before.length;
+    if (!delta) return ranges;
+    return ranges.map((range) =>
+      range.start >= same
+        ? { ...range, start: range.start + delta, end: range.end + delta }
+        : range,
+    );
+  }
+
   function highlight(ranges) {
+    lastRanges = ranges;
     quietly(() => {
       document
         .querySelectorAll("mark[data-komodoc]")
@@ -449,9 +472,59 @@
         image.style.touchAction = tool === "region" ? "none" : "";
       }
     }
+    // The editor's live preview. The document being previewed is not yet
+    // published, so it arrives as HTML over this channel rather than as a
+    // page to load -- which keeps it on this origin, where a document belongs,
+    // instead of inside the reader's. Only the body is replaced: the styles
+    // came from the same template that rendered this, and the observer is
+    // attached to the body element, which has to survive.
+    //
+    // innerHTML does not run scripts, so a preview never executes anything.
+    if (message.type === "preview") {
+      const parsed = new DOMParser().parseFromString(String(message.html || ""), "text/html");
+      quietly(() => {
+        document.body.innerHTML = parsed.body.innerHTML;
+      });
+      // Replacing the body throws away every mark on it, and the ranges to
+      // paint again only arrive after the sidebar has seen the new text and
+      // worked them out. Between the two the document would show no
+      // highlights at all -- which, at one repaint per keystroke, is a flicker
+      // over the whole document while you type.
+      //
+      // So the marks go straight back on, in the same breath as the text, at
+      // the offsets they had a moment ago. Typing shifts them by however much
+      // was typed, which is a few characters for a few milliseconds, and then
+      // the sidebar's own answer arrives and corrects them.
+      if (lastRanges.length) highlight(shiftRanges(lastRanges));
+      // Directly, not through the observer: the observer waits a quarter of a
+      // second before republishing, and a preview should keep up with typing.
+      publish();
+    }
+
+    // Show the reader where a place in the text is. The offset is into the
+    // text this frame published, which is the only thing both sides agree on:
+    // the editor works out which offset a caret in the source corresponds to,
+    // and this end knows which node holds it.
+    if (message.type === "locate") {
+      const start = Number(message.start) || 0;
+      const [piece] = piecesFor(start, start + Math.max(1, Number(message.length) || 1));
+      if (!piece) return;
+      const range = document.createRange();
+      range.setStart(piece.node, piece.from);
+      range.setEnd(piece.node, piece.to);
+      const box = range.getBoundingClientRect();
+      // Scrolled to a third of the way down rather than to the very top: a
+      // line pinned to the edge of the frame reads as cut off.
+      scrollTo({ top: scrollY + box.top - innerHeight / 3, behavior: "smooth" });
+      return;
+    }
+
     if (message.type === "reveal") {
+      // A note on a passage is painted as a <mark>; a note on a figure is a box
+      // in that figure's region layer. Either one is what "go to it" means.
+      const id = CSS.escape(String(message.id));
       document
-        .querySelector(`mark[data-komodoc~="${CSS.escape(String(message.id))}"]`)
+        .querySelector(`mark[data-komodoc~="${id}"], .komodoc-regions [data-komodoc~="${id}"]`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     }
   });
@@ -464,6 +537,21 @@
     clearTimeout(selectionTimer);
     selectionTimer = setTimeout(captureSelection, delay);
   }
+
+  // A click in the document, reported as an offset into the published text, so
+  // the editor can put its caret in the same place. Only the position is sent;
+  // a click that lands on nothing textual says nothing.
+  document.addEventListener("click", (event) => {
+    if (!table.nodes.length) return;
+    const caret = document.caretPositionFromPoint
+      ? document.caretPositionFromPoint(event.clientX, event.clientY)
+      : null;
+    const node = caret?.offsetNode;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    const index = table.index.get(node);
+    if (index === undefined) return;
+    post({ type: "caret", offset: table.starts[index] + (caret.offset || 0) });
+  });
 
   document.addEventListener("mouseup", () => scheduleSelection(0));
   document.addEventListener("touchend", () => scheduleSelection(120), { passive: true });

@@ -16,3 +16,9 @@ src/shell/README.md
 examples/.venv/
 examples/__marimo__/
 .claude
+
+# Built by `make wasm` and `make typst`: generated, large, and rebuilt from
+# the engine crate. Releases build them before the binary.
+src/shell/wasm/
+# Cargo build output.
+target/
