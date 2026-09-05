@@ -22,3 +22,6 @@ examples/__marimo__/
 src/shell/wasm/
 # Cargo build output.
 target/
+
+# The Cargo lockfile is committed: this builds a binary, not a library.
+dist/
