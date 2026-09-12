@@ -16,6 +16,7 @@
   import { attribution, authorIndex, itemsFor } from "../lib/redlines.js";
   import { orphanState } from "../lib/orphan.js";
   import * as latex from "../lib/latex.js";
+  import { parse as parseSynctex, lineAt as synctexLineAt } from "../lib/synctex.js";
   import * as localQuarto from "../lib/latex/local.js";
   import { checkPlacement, basename, inside } from "../lib/file-manager.js";
   import { snapshotDigest } from "../lib/tree-digest.js";
@@ -571,7 +572,10 @@
         break;
       }
       case "caret":
-        followDocumentClick(Number(message.offset) || 0);
+        followDocumentClick(Number(message.offset) || 0, message.pdf);
+        break;
+      case "pdf-caret":
+        followPdfClick(message.pdf);
         break;
       case "focus":
         void focusAnnotation(message.id);
@@ -2027,6 +2031,7 @@
   let deliveredKind = $state("");
   let docxArtifact = $state(null);
   let deliveredHistorySha = null;
+  let activeSynctex = null;
   framePreview = createFramePreview({
     slug: SLUG,
     getDocsOrigin: () => docsOrigin,
@@ -2039,6 +2044,7 @@
       deliveredKind = "";
       docxArtifact = null;
       deliveredHistorySha = null;
+      activeSynctex = null;
       lastRegions = lastHighlight = null;
     },
     onDelivered: (payload) => {
@@ -2226,6 +2232,10 @@
         pdfFailure = false;
         pdfFailureReason = "";
         const buffer = pdf.buffer ? pdf.buffer.slice(pdf.byteOffset, pdf.byteOffset + pdf.byteLength) : pdf;
+        const parsedSynctex = format === "latex" && synctex && typeof parseSynctex === "function"
+          ? await parseSynctex(synctex, Object.keys(tree.texts || {})) : null;
+        if (format === "latex" && superseded(mine, snapshotNavigation, snapshotSource, slow, format, tree)) return;
+        if (typeof activeSynctex !== "undefined") activeSynctex = parsedSynctex;
         const preview = { kind: "pdf", sha: snapshotIdentity, bytes: new Uint8Array(buffer.slice(0)) };
         framePreview.publish(preview);
         if (snapshotSource === sourceGeneration) {
@@ -2434,6 +2444,15 @@
       // document's: a .bib beside a .tex has comments of its own kind, and
       // stripping .tex comments out of it would blank the wrong runs.
       const format = renderers.formatOf(session?.paths?.get(openFile) || "") || sourceFormat;
+      if (format === "latex" && typeof activeSynctex !== "undefined" && activeSynctex) {
+        const path = session?.paths?.get(openFile) || "";
+        const precise = activeSynctex.forward(path, synctexLineAt(editor.text(), editor.caret()));
+        if (precise) {
+          tell({ type: "synctex-locate", page: precise.page, x: precise.x, y: precise.y });
+          lost(false);
+          return;
+        }
+      }
       const place = sync.documentPlaceFor(editor.text(), editor.caret(), docText, format);
       if (place) {
         tell({ type: "locate", start: place.at, length: place.length });
@@ -2448,13 +2467,14 @@
     }, 120);
   }
 
-  function followDocumentClick(offset) {
+  function followDocumentClick(offset, pdfPoint = null) {
     if (!linked || !editing || docText === null || !editor) return;
     // The words clicked in the document may belong to any file: a reader
     // clicking a paragraph of chapter three is asking for chapter three, not
     // for the file that happens to be on screen. So the whole directory is
     // searched, and the file the words are in is opened.
     const tree = treeNow();
+    if (followPdfClick(pdfPoint)) return;
     const found = sync.sourcePlaceInTree(docText, offset, tree, {
       open: session?.paths?.get(openFile) || "",
       formatOf: renderers.formatOf,
@@ -2471,6 +2491,18 @@
     } else {
       editor.goTo(found.at);
     }
+  }
+
+  function followPdfClick(pdfPoint) {
+    if (!linked || !editing || !editor || sourceFormat !== "latex" ||
+        typeof activeSynctex === "undefined" || !activeSynctex || !pdfPoint) return false;
+    const precise = activeSynctex.inverse(Number(pdfPoint.page), Number(pdfPoint.x), Number(pdfPoint.y));
+    const id = precise && session.idOf(precise.path);
+    if (!id) return false;
+    lost(false);
+    openFile = id;
+    editor.openAt(id, precise.line, 1);
+    return true;
   }
 
   function setLinked(on) {

@@ -1276,6 +1276,10 @@ import {
       scrollTo({ top: scrollY + box.top - innerHeight / 3, behavior: "smooth" });
       return;
     }
+    if (message.type === "synctex-locate") {
+      globalThis.librepaperViewer?.locatePoint?.(message.page, message.x, message.y);
+      return;
+    }
 
     if (message.type === "select") select(message.id);
     if (message.type === "reveal") {
@@ -1303,12 +1307,19 @@ import {
   // a click that lands on nothing textual says nothing.
   document.addEventListener("click", (event) => {
     if (tool === "point" && event.target.closest("a,button,input,textarea,select,mark[data-librepaper]")) return;
-    if (!table.nodes.length) return;
+    const pdf = globalThis.librepaperViewer?.pointFromClient?.(event.clientX, event.clientY) || null;
+    if (!table.nodes.length) {
+      if (pdf && tool !== "point") post({ type: "pdf-caret", pdf });
+      return;
+    }
     const caret = document.caretPositionFromPoint
       ? document.caretPositionFromPoint(event.clientX, event.clientY)
       : null;
     const node = caret?.offsetNode;
-    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    if (!node || node.nodeType !== Node.TEXT_NODE) {
+      if (pdf && tool !== "point") post({ type: "pdf-caret", pdf });
+      return;
+    }
     const index = table.index.get(node);
     if (index === undefined) return;
     const offset = table.starts[index] + (caret.offset || 0);
@@ -1328,7 +1339,7 @@ import {
       });
       return;
     }
-    post({ type: "caret", offset });
+    post({ type: "caret", offset, pdf });
   });
 
   document.addEventListener("mouseup", () => scheduleSelection(0));
